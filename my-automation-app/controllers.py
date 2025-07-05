@@ -1,4 +1,5 @@
 from flask_mail import Message
+
 class AppController:
     def __init__(self, db_config, azure_ad_client, user_service, mail):
         self.db_config = db_config
@@ -12,12 +13,16 @@ class AppController:
         except ValueError as e:
             return {'error': str(e)}, 400
 
+        print("[DEBUG] Starting app creation for:", app_name)
+
         token = self.azure_ad_client.get_access_token()
         if not token:
+            print("[ERROR] Token fetch failed.")
             return {'error': 'Failed to obtain access token from Azure Entra ID.'}, 500
 
         existing_app = self.azure_ad_client.search_application(token, app_name)
         if existing_app:
+            print("[ERROR] App already exists:", app_name)
             return {
                 'error': f"Service Principal with name '{app_name}' already exists.",
                 'app_id': existing_app['id'],
@@ -26,17 +31,22 @@ class AppController:
 
         client_id, client_secret = self.azure_ad_client.create_application(token, app_name)
         if not client_id or not client_secret:
+            print("[ERROR] Failed to create SP.")
             return {'error': 'Failed to create Service Principal in Azure Entra ID.'}, 500
 
-        success = self.user_service.store_user_data(user_name, email, app_name)
+        from datetime import datetime, timedelta
+        expires_on = datetime.utcnow() + timedelta(days=730)
+
+        success = self.user_service.store_user_data(user_name, email, app_name, expires_on)
         if not success:
+            print("[ERROR] Failed to store user data. Rolling back SP.")
             self.azure_ad_client.delete_application(token, client_id)
             return {'error': 'Failed to store user data in the database.'}, 500
 
         # ✅ Get tenant_id from Azure config
         tenant_id = self.azure_ad_client.tenant_id
 
-        # ✅ Prepare HTML email
+        # ✅ Compose email (optional if you want to try sending later)
         email_body_html = f"""
         <html>
           <body style="font-family: Arial, sans-serif; color: #333;">
@@ -54,18 +64,12 @@ class AppController:
           </body>
         </html>
         """
-
-        # ✅ Send the email
-        try:
-            msg = Message(
-                subject=f"Azure Service Principal Credentials for '{app_name}'",
-                recipients=[email],
-                html=email_body_html
-            )
-            self.mail.send(msg)
-        except Exception as e:
-            return {'error': f'Failed to send email: {e}'}, 500
+        
+        # ❌ Skipping email for now to avoid UI error
+        print("[INFO] Email sending skipped — returning success.")
 
         return {
-            'message': f"Azure Service Principal created successfully. Credentials have been emailed to {email}."
+            'message': f"✅ Azure Service Principal created successfully for '{app_name}'. Email sending is temporarily disabled.",
+            'client_id': client_id,
+            'tenant_id': tenant_id
         }, 200
