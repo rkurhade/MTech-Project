@@ -65,8 +65,9 @@ jobs:
       - name: ⏱️ Wait before deploying (avoid SCM container race condition)
         run: sleep 30
 
-      - name: Deploy using Zip Deploy
-        run: |
-              curl -X POST -u ${{ secrets.AZURE_DEPLOY_USERNAME }}:${{ secrets.AZURE_DEPLOY_PASSWORD }} \
-              --data-binary @release.zip \
-              https://automation-spn-server.scm.azurewebsites.net/api/zipdeploy
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        id: deploy-to-webapp
+        with:
+          app-name: 'automation-spn-server'
+          slot-name: 'Production'
