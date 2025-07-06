@@ -23,7 +23,7 @@ except Exception as e:
 
 cursor = conn.cursor()
 
-# 🔍 Find Service Principals expiring in next 2 minutes
+# Find Service Principals expiring in next 2 minutes
 target_time = datetime.utcnow() + timedelta(minutes=2)
 cursor.execute("SELECT user_name, email, app_name, expires_on FROM user_info WHERE expires_on <= ?", target_time)
 results = cursor.fetchall()
@@ -39,20 +39,18 @@ smtp_user = os.getenv("MAIL_USERNAME")
 smtp_pass = os.getenv("MAIL_PASSWORD")
 sender = os.getenv("MAIL_SENDER")
 
-# 📧 Send email to each user
+# Send email to each user
 for user_name, email, app_name, expires_on in results:
-    subject = f"⏰ URGENT: Secret expiring soon for '{app_name}'"
+    subject = f" URGENT: Secret expiring soon for '{app_name}'"
     body = f"""
 Hi {user_name},
 
-⚠️ This is an automated reminder that the Azure Service Principal **{app_name}** is about to expire at:
-
-👉 **{expires_on} UTC**
+This is an automated reminder that the Azure Service Principal **{app_name}** is about to expire at: **{expires_on} UTC**
 
 Please take necessary action if this SP is still in use.
 
 Regards,  
-Azure SP Automation Bot
+Azure SP Automation Team
 """
 
     msg = MIMEText(body)

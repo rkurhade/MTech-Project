@@ -56,7 +56,7 @@ class AppController:
         # Store data in DB
         success = self.user_service.store_user_data(user_name, email, app_name, expires_on)
         if not success:
-            print("[ERROR] Failed to store user data. Rolling back SP.")
+            print("[ERROR] Failed to store user data.")
             self.azure_ad_client.delete_application(token, client_id)
             return {'error': 'Failed to store user data in the database.'}, 500
 
