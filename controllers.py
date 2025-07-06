@@ -72,7 +72,6 @@ class AppController:
               <tr><td style="padding: 8px; font-weight: bold;">Client ID:</td><td style="padding: 8px;">{client_id}</td></tr>
               <tr><td style="padding: 8px; font-weight: bold;">Client Secret:</td><td style="padding: 8px;">{client_secret}</td></tr>
               <tr><td style="padding: 8px; font-weight: bold;">Tenant ID:</td><td style="padding: 8px;">{tenant_id}</td></tr>
-              <tr><td style="padding: 8px; font-weight: bold;">Expires On:</td><td style="padding: 8px;">{expires_on.strftime("%Y-%m-%d %H:%M:%S")} UTC</td></tr>
             </table>
             <p><strong>NOTE: Secret is valid for {'1 minute' if is_testing else '24 months'} from date of creation</strong>.</p>
             <p><strong>Please store these credentials securely</strong>. Do not share them with unauthorized users.</p>
@@ -98,5 +97,4 @@ class AppController:
             'message': f" Azure Service Principal created successfully for '{app_name}'. Credentials have been emailed to {email}.",
             'client_id': client_id,
             'tenant_id': tenant_id,
-            'expires_on': expires_on.isoformat()
         }, 200
