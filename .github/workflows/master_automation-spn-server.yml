@@ -1,8 +1,7 @@
 # Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
 # More GitHub Actions for Azure: https://github.com/Azure/actions
-# More info on Python, GitHub Actions, and Azure App Service: https://aka.ms/python-webapps-actions
 
-name: Build and deploy Python app to Azure Web App - automation-spn-server
+name: Build and deploy Python app to Azure Web App - Automation-SPN
 
 on:
   push:
@@ -14,7 +13,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read #This is required for actions/checkout
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -25,32 +24,33 @@ jobs:
           python-version: '3.12'
 
       - name: Create and start virtual environment
+        working-directory: ./my-automation-app
         run: |
           python -m venv venv
           source venv/bin/activate
-      
+
       - name: Install dependencies
+        working-directory: ./my-automation-app
         run: pip install -r requirements.txt
-        
-      # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
       - name: Zip artifact for deployment
-        run: zip release.zip ./* -r
+        working-directory: ./my-automation-app
+        run: zip -r release.zip ./*
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
           name: python-app
           path: |
-            release.zip
-            !venv/
+            my-automation-app/release.zip
+            !my-automation-app/venv/
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
     permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
+      id-token: write
+      contents: read
 
     steps:
       - name: Download artifact from build job
@@ -61,18 +61,16 @@ jobs:
       - name: Unzip artifact for deployment
         run: unzip release.zip
 
-      
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_460058079196493BAFC7EAFC55148C15 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_99ACCF3001024E0E9A8B5B6E38FDE74F }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_F304D9F963434FACBBBDAE8E60B71B12 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_CFC5EFFD69994185A50C4D98B6C7ECDC }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_7BF43D259276425BB6C0281B4CD48F57 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_3BEC2410E01647B68355B4EA8237E43B }}
 
-      - name: 'Deploy to Azure Web App'
+      - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
-          app-name: 'automation-spn-server'
+          app-name: 'Automation-SPN'
           slot-name: 'Production'
-          
