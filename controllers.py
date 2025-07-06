@@ -1,5 +1,6 @@
 from flask_mail import Message
 from datetime import datetime, timedelta
+import os  # <-- Make sure this is imported at the top
 
 class AppController:
     def __init__(self, db_config, azure_ad_client, user_service, mail):
@@ -35,9 +36,17 @@ class AppController:
             print("[ERROR] Failed to create SP.")
             return {'error': 'Failed to create Service Principal in Azure Entra ID.'}, 500
 
-        expires_on = datetime.utcnow() + timedelta(days=730)
-        success = self.user_service.store_user_data(user_name, email, app_name, expires_on)
+        # ✅ Dynamic expiry logic
+        is_testing = os.environ.get("EXPIRY_TEST_MODE", "False").lower() == "true"
+        if is_testing:
+            print("[INFO] EXPIRY_TEST_MODE is ON: Using 1-minute expiry.")
+            expires_on = datetime.utcnow() + timedelta(minutes=1)
+        else:
+            print("[INFO] EXPIRY_TEST_MODE is OFF: Using 24-month expiry.")
+            expires_on = datetime.utcnow() + timedelta(days=730)
 
+        # ✅ Store user data
+        success = self.user_service.store_user_data(user_name, email, app_name, expires_on)
         if not success:
             print("[ERROR] Failed to store user data. Rolling back SP.")
             self.azure_ad_client.delete_application(token, client_id)
@@ -45,6 +54,7 @@ class AppController:
 
         tenant_id = self.azure_ad_client.tenant_id
 
+        # ✅ Compose email with expiry
         email_body_html = f"""
         <html>
           <body style="font-family: Arial, sans-serif; color: #333;">
@@ -55,15 +65,14 @@ class AppController:
               <tr><td style="padding: 8px; font-weight: bold;">Client ID:</td><td style="padding: 8px;">{client_id}</td></tr>
               <tr><td style="padding: 8px; font-weight: bold;">Client Secret:</td><td style="padding: 8px;">{client_secret}</td></tr>
               <tr><td style="padding: 8px; font-weight: bold;">Tenant ID:</td><td style="padding: 8px;">{tenant_id}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Expires On:</td><td style="padding: 8px;">{expires_on.strftime('%Y-%m-%d %H:%M:%S')} UTC</td></tr>
             </table>
-            <p><strong>NOTE: Secret is valid for 24 Months from date of creation</strong>.</p>
             <p><strong>Please store these credentials securely</strong>. Do not share them with unauthorized users.</p>
             <p>Best Regards,<br>Azure Service Principal Automation Team</p>
           </body>
         </html>
         """
 
-        # ✅ Attempt to send email
         try:
             msg = Message(
                 subject=f"Azure Service Principal Credentials for '{app_name}'",
