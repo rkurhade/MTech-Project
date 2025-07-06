@@ -1,6 +1,6 @@
 from flask_mail import Message
 from datetime import datetime, timedelta
-import os  # <-- Make sure this is imported at the top
+import os
 
 class AppController:
     def __init__(self, db_config, azure_ad_client, user_service, mail):
@@ -17,11 +17,18 @@ class AppController:
 
         print("[DEBUG] Starting app creation for:", app_name)
 
+        # Try DB connection before touching Azure
+        if self.db_config.connect() is None:
+            print("[ERROR] Could not establish DB connection")
+            return {'error': 'Failed to connect to database.'}, 500
+
+        # Get Azure token
         token = self.azure_ad_client.get_access_token()
         if not token:
             print("[ERROR] Token fetch failed.")
             return {'error': 'Failed to obtain access token from Azure Entra ID.'}, 500
 
+        # Check if app already exists
         existing_app = self.azure_ad_client.search_application(token, app_name)
         if existing_app:
             print("[ERROR] App already exists:", app_name)
@@ -31,12 +38,13 @@ class AppController:
                 'client_id': existing_app['appId']
             }, 409
 
+        # Create new app + secret
         client_id, client_secret = self.azure_ad_client.create_application(token, app_name)
         if not client_id or not client_secret:
             print("[ERROR] Failed to create SP.")
             return {'error': 'Failed to create Service Principal in Azure Entra ID.'}, 500
 
-        # ✅ Dynamic expiry logic
+        # Calculate expiry time (toggle with EXPIRY_TEST_MODE)
         is_testing = os.environ.get("EXPIRY_TEST_MODE", "False").lower() == "true"
         if is_testing:
             print("[INFO] EXPIRY_TEST_MODE is ON: Using 1-minute expiry.")
@@ -45,16 +53,15 @@ class AppController:
             print("[INFO] EXPIRY_TEST_MODE is OFF: Using 24-month expiry.")
             expires_on = datetime.utcnow() + timedelta(days=730)
 
-        # ✅ Store user data
+        # Store data in DB
         success = self.user_service.store_user_data(user_name, email, app_name, expires_on)
         if not success:
             print("[ERROR] Failed to store user data. Rolling back SP.")
             self.azure_ad_client.delete_application(token, client_id)
             return {'error': 'Failed to store user data in the database.'}, 500
 
+        # Prepare email content
         tenant_id = self.azure_ad_client.tenant_id
-
-        # ✅ Compose email with expiry
         email_body_html = f"""
         <html>
           <body style="font-family: Arial, sans-serif; color: #333;">
@@ -65,14 +72,16 @@ class AppController:
               <tr><td style="padding: 8px; font-weight: bold;">Client ID:</td><td style="padding: 8px;">{client_id}</td></tr>
               <tr><td style="padding: 8px; font-weight: bold;">Client Secret:</td><td style="padding: 8px;">{client_secret}</td></tr>
               <tr><td style="padding: 8px; font-weight: bold;">Tenant ID:</td><td style="padding: 8px;">{tenant_id}</td></tr>
-              <tr><td style="padding: 8px; font-weight: bold;">Expires On:</td><td style="padding: 8px;">{expires_on.strftime('%Y-%m-%d %H:%M:%S')} UTC</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Expires On:</td><td style="padding: 8px;">{expires_on.strftime("%Y-%m-%d %H:%M:%S")} UTC</td></tr>
             </table>
+            <p><strong>NOTE: Secret is valid for {'1 minute' if is_testing else '24 months'} from date of creation</strong>.</p>
             <p><strong>Please store these credentials securely</strong>. Do not share them with unauthorized users.</p>
             <p>Best Regards,<br>Azure Service Principal Automation Team</p>
           </body>
         </html>
         """
 
+        # Send email
         try:
             msg = Message(
                 subject=f"Azure Service Principal Credentials for '{app_name}'",
@@ -84,8 +93,10 @@ class AppController:
             print(f"[ERROR] Failed to send email: {e}")
             return {'error': f'Failed to send email: {str(e)}'}, 500
 
+        # Success
         return {
-            'message': f"✅ Azure Service Principal created successfully for '{app_name}'. Credentials have been emailed to {email}.",
+            'message': f" Azure Service Principal created successfully for '{app_name}'. Credentials have been emailed to {email}.",
             'client_id': client_id,
-            'tenant_id': tenant_id
+            'tenant_id': tenant_id,
+            'expires_on': expires_on.isoformat()
         }, 200
