@@ -1,4 +1,5 @@
 from flask_mail import Message
+from datetime import datetime, timedelta
 
 class AppController:
     def __init__(self, db_config, azure_ad_client, user_service, mail):
@@ -34,19 +35,16 @@ class AppController:
             print("[ERROR] Failed to create SP.")
             return {'error': 'Failed to create Service Principal in Azure Entra ID.'}, 500
 
-        from datetime import datetime, timedelta
         expires_on = datetime.utcnow() + timedelta(days=730)
-
         success = self.user_service.store_user_data(user_name, email, app_name, expires_on)
+
         if not success:
             print("[ERROR] Failed to store user data. Rolling back SP.")
             self.azure_ad_client.delete_application(token, client_id)
             return {'error': 'Failed to store user data in the database.'}, 500
 
-        # ✅ Get tenant_id from Azure config
         tenant_id = self.azure_ad_client.tenant_id
 
-        # ✅ Compose email (optional if you want to try sending later)
         email_body_html = f"""
         <html>
           <body style="font-family: Arial, sans-serif; color: #333;">
@@ -64,12 +62,21 @@ class AppController:
           </body>
         </html>
         """
-        
-        # ❌ Skipping email for now to avoid UI error
-        print("[INFO] Email sending skipped — returning success.")
+
+        # ✅ Attempt to send email
+        try:
+            msg = Message(
+                subject=f"Azure Service Principal Credentials for '{app_name}'",
+                recipients=[email],
+                html=email_body_html
+            )
+            self.mail.send(msg)
+        except Exception as e:
+            print(f"[ERROR] Failed to send email: {e}")
+            return {'error': f'Failed to send email: {str(e)}'}, 500
 
         return {
-            'message': f"✅ Azure Service Principal created successfully for '{app_name}'. Email sending is temporarily disabled.",
+            'message': f"✅ Azure Service Principal created successfully for '{app_name}'. Credentials have been emailed to {email}.",
             'client_id': client_id,
             'tenant_id': tenant_id
         }, 200
