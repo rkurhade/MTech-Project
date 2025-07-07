@@ -9,13 +9,14 @@ import re
 # Setup Flask app
 app = Flask(__name__)
 
-# Load mail config from ConfigLoader instead of env vars
+# Load mail config from ConfigLoader
 mail_config = ConfigLoader.load_mail_config()
 
 app.config.update(
     MAIL_SERVER=mail_config['MAIL_SERVER'],
-    MAIL_PORT=int(mail_config['MAIL_PORT']),
-    MAIL_USE_TLS=mail_config['MAIL_USE_TLS'] == "True" or mail_config['MAIL_USE_TLS'] is True,
+    MAIL_PORT=mail_config['MAIL_PORT'],
+    MAIL_USE_TLS=mail_config['MAIL_USE_TLS'],
+    MAIL_USE_SSL=mail_config['MAIL_USE_SSL'],
     MAIL_USERNAME=mail_config['MAIL_USERNAME'],
     MAIL_PASSWORD=mail_config['MAIL_PASSWORD'],
     MAIL_DEFAULT_SENDER=mail_config['MAIL_DEFAULT_SENDER']
