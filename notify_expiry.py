@@ -6,14 +6,18 @@ from datetime import datetime
 
 def handle_expired_secrets():
     try:
-        sql_server = os.getenv('SQL_SERVER') + '.database.windows.net'
-        database = os.getenv('SQL_DATABASE')
-        username = os.getenv('SQL_USERNAME')
-        password = os.getenv('SQL_PASSWORD')
+        sql_server = os.getenv('DB_SERVER')
+        print(f"DB_SERVER env var: {sql_server}")
+        if sql_server is None:
+            return {"status": "error", "message": "DB_SERVER env var is None"}
+
+        database = os.getenv('DB_DATABASE')
+        username = os.getenv('DB_USERNAME')
+        password = os.getenv('DB_PASSWORD')
         driver = '{ODBC Driver 17 for SQL Server}'
 
-        smtp_server = os.getenv('SMTP_SERVER')
-        from_email = os.getenv('FROM_EMAIL')
+        smtp_server = os.getenv('MAIL_SERVER')
+        from_email = os.getenv('MAIL_DEFAULT_SENDER')
 
         conn_str = f"""
             DRIVER={driver};
@@ -54,7 +58,7 @@ The client secret for your app '{app_name}' is expiring on {expires_on.date()}.
 Please renew it before it expires to avoid service disruption.
 
 Regards,
-Automation Team
+Azure Automation Team
 """
 
             msg = MIMEText(body, "plain")
