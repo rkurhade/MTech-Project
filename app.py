@@ -4,6 +4,7 @@ from clients import AzureADClient
 from services import DatabaseConfig, UserService
 from controllers import AppController
 from flask_mail import Mail
+from notify_expiry import handle_expired_secrets
 import re
 
 # Setup Flask app
@@ -49,6 +50,13 @@ def create_app():
 
     response, status_code = app_controller.create_application(user_name, email, app_name)
     return jsonify(response), status_code
+
+
+@app.route('/notify_expiry', methods=['POST'])
+def notify_expiry():
+    from notify_expiry import handle_expired_secrets
+    response = handle_expired_secrets()
+    return jsonify(response), 200
 
 
 if __name__ == '__main__':
