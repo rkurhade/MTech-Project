@@ -6,17 +6,13 @@ from datetime import datetime
 
 def handle_expired_secrets():
     try:
-        sql_server = os.getenv('DB_SERVER')
-        print(f"DB_SERVER env var: {sql_server}")
-        if sql_server is None:
-            return {"status": "error", "message": "DB_SERVER env var is None"}
-
-        database = os.getenv('DB_DATABASE')
-        username = os.getenv('DB_USERNAME')
-        password = os.getenv('DB_PASSWORD')
+        sql_server = os.getenv('DB_SERVER'),
+        database = os.getenv('DB_DATABASE'),
+        username = os.getenv('DB_USERNAME'),
+        password = os.getenv('DB_PASSWORD'),
         driver = '{ODBC Driver 17 for SQL Server}'
 
-        smtp_server = os.getenv('MAIL_SERVER')
+        smtp_server = os.getenv('MAIL_SERVER'),
         from_email = os.getenv('MAIL_DEFAULT_SENDER')
 
         conn_str = f"""
