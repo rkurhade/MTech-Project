@@ -1,5 +1,5 @@
 import pyodbc
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class DatabaseConfig:
     def __init__(self, config):
@@ -60,3 +60,30 @@ class UserService:
         finally:
             conn.close()
             print("[INFO] DB connection closed")
+
+    def get_expiring_secrets(self, days_before_expiry=7):
+        """Return list of users/apps whose secrets expire within next `days_before_expiry` days."""
+        conn = self.db_config.connect()
+        if conn is None:
+            print("[ERROR] Could not establish DB connection")
+            return []
+
+        try:
+            cursor = conn.cursor()
+            threshold_date = datetime.utcnow() + timedelta(days=days_before_expiry)
+
+            cursor.execute('''
+                SELECT user_name, email, app_name, expires_on 
+                FROM user_info 
+                WHERE expires_on <= ? AND expires_on >= ?
+            ''', (threshold_date, datetime.utcnow()))
+
+            results = cursor.fetchall()
+            return results
+
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch expiring secrets: {e}")
+            return []
+
+        finally:
+            conn.close()

@@ -3,28 +3,27 @@ from config import ConfigLoader
 from clients import AzureADClient
 from services import DatabaseConfig, UserService
 from controllers import AppController
-from flask_mail import Mail, Message
-import os
+from flask_mail import Mail
 import re
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # Setup Flask app
 app = Flask(__name__)
 
-# Configure mail settings from .env
+# Load mail config from ConfigLoader instead of env vars
+mail_config = ConfigLoader.load_mail_config()
+
 app.config.update(
-    MAIL_SERVER=os.getenv("MAIL_SERVER"),
-    MAIL_PORT=int(os.getenv("MAIL_PORT")),
-    MAIL_USE_TLS=os.getenv("MAIL_USE_TLS") == "True",
-    MAIL_USERNAME=os.getenv("MAIL_USERNAME"),
-    MAIL_PASSWORD=os.getenv("MAIL_PASSWORD"),
-    MAIL_DEFAULT_SENDER=os.getenv("MAIL_DEFAULT_SENDER")
+    MAIL_SERVER=mail_config['MAIL_SERVER'],
+    MAIL_PORT=int(mail_config['MAIL_PORT']),
+    MAIL_USE_TLS=mail_config['MAIL_USE_TLS'] == "True" or mail_config['MAIL_USE_TLS'] is True,
+    MAIL_USERNAME=mail_config['MAIL_USERNAME'],
+    MAIL_PASSWORD=mail_config['MAIL_PASSWORD'],
+    MAIL_DEFAULT_SENDER=mail_config['MAIL_DEFAULT_SENDER']
 )
+
 mail = Mail(app)
 
-# Load services and controller
+# Load other services and controller
 db_config = DatabaseConfig(ConfigLoader.load_db_config())
 azure_ad_client = AzureADClient(ConfigLoader.load_azure_ad_config())
 user_service = UserService(db_config)
@@ -43,22 +42,12 @@ def create_app():
     email = data.get('user_email')
     app_name = data.get('app_name')
 
-    # ✅ Backend email format validation
+    # Backend email format validation
     if not EMAIL_REGEX.match(email.lower()):
         return jsonify({'error': 'Invalid email format provided.'}), 400
 
     response, status_code = app_controller.create_application(user_name, email, app_name)
     return jsonify(response), status_code
-
-
-#if __name__ == '__main__':
-#    app.run(host='0.0.0.0', port=5000, debug=True)
-
-#if __name__ == '__main__':
-#    app.run()
-
-#if __name__ == '__main__':
- #   app.run(debug=True)
 
 
 if __name__ == '__main__':
