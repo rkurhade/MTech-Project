@@ -6,14 +6,14 @@ from datetime import datetime
 
 def handle_expired_secrets():
     try:
-        sql_server = os.getenv('DB_SERVER'),
-        database = os.getenv('DB_DATABASE'),
-        username = os.getenv('DB_USERNAME'),
-        password = os.getenv('DB_PASSWORD'),
+        sql_server = os.getenv('DB_SERVER')              # ✅ no comma
+        database = os.getenv('DB_DATABASE')              # ✅ no comma
+        username = os.getenv('DB_USERNAME')              # ✅ no comma
+        password = os.getenv('DB_PASSWORD')              # ✅ no comma
         driver = '{ODBC Driver 17 for SQL Server}'
 
-        smtp_server = os.getenv('MAIL_SERVER'),
-        from_email = os.getenv('MAIL_DEFAULT_SENDER')
+        smtp_server = os.getenv('MAIL_SERVER')           # ✅ no comma
+        from_email = os.getenv('MAIL_DEFAULT_SENDER')    # ✅ no comma
 
         conn_str = f"""
             DRIVER={driver};
