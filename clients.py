@@ -1,5 +1,4 @@
 import requests
-from dotenv import load_dotenv
 
 class AzureADClient:
     def __init__(self, config):
