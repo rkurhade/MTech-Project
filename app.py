@@ -50,6 +50,23 @@ def create_app():
     response, status_code = app_controller.create_application(user_name, email, app_name)
     return jsonify(response), status_code
 
+@app.route('/notify_expiry', methods=['POST'])
+def notify_expiry():
+    try:
+        days_before_expiry = int(request.args.get('days', 3))  # Optional ?days=3
+        response, status = app_controller.send_upcoming_expiry_notifications(days_before_expiry)
+        return jsonify(response), status
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/notify_expired', methods=['POST'])
+def notify_expired():
+    try:
+        response, status = app_controller.send_expired_notifications()
+        return jsonify(response), status
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     import os
     port = int(os.environ.get("PORT", 8000))  # Azure sets this
