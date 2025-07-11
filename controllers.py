@@ -45,8 +45,8 @@ class AppController:
         now_utc = datetime.now(timezone.utc)
 
         if is_testing:
-            print("[INFO] EXPIRY_TEST_MODE is ON: Using 1-minute expiry.")
-            expires_on = now_utc + timedelta(minutes=1)
+            print("[INFO] EXPIRY_TEST_MODE is ON: Using 10-minute expiry.")
+            expires_on = now_utc + timedelta(minutes=10)
         else:
             print("[INFO] EXPIRY_TEST_MODE is OFF: Using 24-month expiry.")
             expires_on = now_utc + timedelta(days=730)
@@ -73,7 +73,7 @@ class AppController:
               <tr><td style="padding: 8px; font-weight: bold;">Tenant ID:</td><td style="padding: 8px;">{tenant_id}</td></tr>
               <tr><td style="padding: 8px; font-weight: bold;">Secret Expiry (IST):</td><td style="padding: 8px;">{expires_on_ist_str}</td></tr>
             </table>
-            <p><strong>NOTE: Secret is valid for {'1 minute' if is_testing else '24 months'} from date of creation</strong>.</p>
+            <p><strong>NOTE: Secret is valid for {'10 minute' if is_testing else '24 months'} from date of creation</strong>.</p>
             <p><strong>Please store these credentials securely</strong>. Do not share them with unauthorized users.</p>
             <p>Best Regards,<br>Azure Service Principal Automation Team</p>
           </body>
@@ -97,7 +97,7 @@ class AppController:
             'tenant_id': tenant_id,
         }, 200
 
-    def send_upcoming_expiry_notifications(self, days=3):
+    def send_upcoming_expiry_notifications(self, days=30):
         ist = pytz.timezone("Asia/Kolkata")
         expiring_secrets = self.user_service.get_expiring_soon(days)
 
@@ -153,7 +153,7 @@ class AppController:
                     <body style="font-family: Arial, sans-serif; color: #333;">
                         <p>Hi {user_name},</p>
                         <p><strong>Action Required:</strong> Your Azure Service Principal secret for <strong>{app_name}</strong> expired on <strong>{expires_on_ist.strftime('%Y-%m-%d %H:%M:%S')}</strong> (IST).</p>
-                        <p>Please generate a new secret to avoid service disruption.</p>
+                        <p>Please generate a new secret to avoid service. If you need any help, please contact Azure Authentication-L2 Operations team.</p>
                         <p>Best Regards,<br>Azure Service Principal Automation Team</p>
                     </body>
                 </html>

@@ -53,7 +53,7 @@ def create_app():
 @app.route('/notify_expiry', methods=['POST'])
 def notify_expiry():
     try:
-        days_before_expiry = int(request.args.get('days', 3))  # Optional ?days=3
+        days_before_expiry = int(request.args.get('days', 30)) 
         response, status = app_controller.send_upcoming_expiry_notifications(days_before_expiry)
         return jsonify(response), status
     except Exception as e:
