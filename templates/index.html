@@ -176,11 +176,68 @@
   </footer>
 
 <script>
-    // Reset form and clear result on load
-    window.onload = function () {
-      document.getElementById("createAppForm").reset();
-      document.getElementById("result").style.display = "none";
-    };
+    document.addEventListener("DOMContentLoaded", function() {
+        // Reset form and clear result on page load
+        document.getElementById("createAppForm").reset();
+        document.getElementById("result").style.display = "none";
+
+        // Handle form submission
+        document.getElementById("createAppForm").addEventListener("submit", function (event) {
+            event.preventDefault();
+
+            const registerButton = document.getElementById("registerButton");
+            const resultDiv = document.getElementById("result");
+            
+            // 1. Immediately show the loading state
+            resultDiv.className = "result"; // Reset the class
+            resultDiv.style.display = "block";
+            resultDiv.innerHTML = '<span class="loading-text">Creating Service Principal... Please wait <i class="fa fa-spinner fa-spin"></i></span>';
+            registerButton.disabled = true;
+
+            const user_name = document.getElementById("userName").value;
+            const user_email = document.getElementById("userEmail").value;
+            const app_name = document.getElementById("appName").value;
+
+            // 2. Make the asynchronous call to the backend
+            fetch('/create_app', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_name: user_name,
+                    user_email: user_email,
+                    app_name: app_name
+                })
+            })
+            .then(response => {
+                // Return the promise from response.json() for chaining
+                return response.json().then(data => {
+                    // Check if the response was NOT successful (e.g., status 400 or 500)
+                    if (!response.ok) {
+                        // Throw the error data to be caught by the .catch() block
+                        throw new Error(data.error || 'Unknown error occurred.');
+                    }
+                    return data; // Return the success data
+                });
+            })
+            .then(data => {
+                // 3. On success, show the modal and hide the temporary message
+                resultDiv.style.display = "none";
+                showSuccessPopup(`✅ ${data.message}`);
+            })
+            .catch(error => {
+                // 4. On failure, show the error message in the result div
+                resultDiv.className = "result error";
+                resultDiv.innerHTML = `❌ ${error.message}`;
+                console.error('Error:', error);
+            })
+            .finally(() => {
+                // This block always runs, whether there's success or an error
+                registerButton.disabled = false;
+            });
+        });
+    });
 
     function showSuccessPopup(message) {
       document.getElementById("successMessage").innerText = message;
@@ -191,60 +248,6 @@
       document.getElementById("successModal").style.display = "none";
       window.location.reload(); // Refresh page on close
     }
-
-    // Handle form submission
-    document.getElementById("createAppForm").addEventListener("submit", function (event) {
-      event.preventDefault();
-
-      const registerButton = document.getElementById("registerButton");
-      const resultDiv = document.getElementById("result");
-      
-      // 1. Immediately show the loading state
-      resultDiv.className = "result"; // Reset the class
-      resultDiv.style.display = "block";
-      resultDiv.innerHTML = '<span class="loading-text">Creating Service Principal... Please wait <i class="fa fa-spinner fa-spin"></i></span>';
-      registerButton.disabled = true;
-
-      const user_name = document.getElementById("userName").value;
-      const user_email = document.getElementById("userEmail").value;
-      const app_name = document.getElementById("appName").value;
-
-      // 2. Make the asynchronous call to the backend
-      fetch('/create_app', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          user_name: user_name,
-          user_email: user_email,
-          app_name: app_name
-        })
-      })
-      .then(response => {
-        // Re-enable the button once the fetch promise is settled (resolved or rejected)
-        registerButton.disabled = false;
-        // Check if the response is okay (status code 200-299)
-        if (!response.ok) {
-            // Throw an error to be caught by the .catch() block
-            return response.json().then(errorData => {
-                throw new Error(errorData.error || 'Unknown error occurred.');
-            });
-        }
-        return response.json();
-      })
-      .then(data => {
-        // 3. On success, show the modal and hide the temporary message
-        resultDiv.style.display = "none"; 
-        showSuccessPopup(`✅ ${data.message}`);
-      })
-      .catch(error => {
-        // 4. On failure, show the error message in the result div
-        resultDiv.className = "result error";
-        resultDiv.innerHTML = `❌ ${error.message}`;
-        console.error('Error:', error);
-      });
-    });
 </script>
 
 </body>
