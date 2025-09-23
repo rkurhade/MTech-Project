@@ -129,6 +129,11 @@
       border-radius: 4px;
       cursor: pointer;
     }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
@@ -137,22 +142,25 @@
     <h1>Register Azure Service Principal</h1>
     <form id="createAppForm">
       <label for="appName">Service Principal Name</label>
-      <input type="text" id="appName" name="app_name"/>
+      <input type="text" id="appName" name="app_name" required/>
 
       <label for="userName">Owner Name</label>
-      <input type="text" id="userName" name="user_name" pattern="[A-Za-z\s]+" title="Only letters and spaces allowed" />
+      <input type="text" id="userName" name="user_name" pattern="[A-Za-z\s]+" title="Only letters and spaces allowed" required />
 
       <label for="userEmail">Owner Email</label>    
       <input type="email" id="userEmail" name="user_email"
        pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$"
-       title="Please enter a valid email address!">
+       title="Please enter a valid email address!" required>
 
-      <button type="submit">Register</button>
+      <button type="submit" id="registerBtn">Register</button>
     </form>
 
     <div id="result" class="result" style="display: none;"></div>
-    <div id="loading" class="result" style="display: none; text-align:center;">
-      <span id="loadingSpinner" style="font-size:22px;">⏳ Creating Azure Service Principal...</span>
+    <div id="loading" class="result" style="display: none; text-align:center;" aria-live="polite" aria-busy="true">
+      <span id="loadingSpinner" style="font-size:22px; display:inline-block;">
+        <span class="spinner" style="display:inline-block; width:24px; height:24px; border:4px solid #007bff; border-top:4px solid #e6ffed; border-radius:50%; animation: spin 1s linear infinite; vertical-align:middle;"></span>
+        &nbsp;Creating Azure Service Principal...
+      </span>
     </div>
   </div>
 
@@ -179,11 +187,22 @@
     document.getElementById("createAppForm").addEventListener("submit", function (event) {
       event.preventDefault();
 
-      const user_name = document.getElementById("userName").value;
-      const user_email = document.getElementById("userEmail").value;
-      const app_name = document.getElementById("appName").value;
+      const user_name = document.getElementById("userName").value.trim();
+      const user_email = document.getElementById("userEmail").value.trim();
+      const app_name = document.getElementById("appName").value.trim();
+      const registerBtn = document.getElementById("registerBtn");
 
-      // Show loading indicator
+      // Basic client-side validation
+      if (!app_name || !user_name || !user_email) {
+        const resultDiv = document.getElementById("result");
+        resultDiv.className = "result error";
+        resultDiv.style.display = "block";
+        resultDiv.innerHTML = "❌ Please fill in all fields.";
+        return;
+      }
+
+      // Disable button and show loading
+      registerBtn.disabled = true;
       document.getElementById("loading").style.display = "block";
       document.getElementById("result").style.display = "none";
 
@@ -201,6 +220,7 @@
       .then(response => response.json())
       .then(data => {
         document.getElementById("loading").style.display = "none";
+        registerBtn.disabled = false;
         const resultDiv = document.getElementById("result");
 
         if (data.error) {
@@ -213,6 +233,7 @@
       })
       .catch(error => {
         document.getElementById("loading").style.display = "none";
+        registerBtn.disabled = false;
         const resultDiv = document.getElementById("result");
         resultDiv.className = "result error";
         resultDiv.style.display = "block";
@@ -223,10 +244,14 @@
     function showSuccessPopup(message) {
       document.getElementById("successMessage").innerText = message;
       document.getElementById("successModal").style.display = "block";
+      document.getElementById("loading").style.display = "none";
+      document.getElementById("registerBtn").disabled = false;
     }
 
     function closeModal() {
       document.getElementById("successModal").style.display = "none";
+      document.getElementById("loading").style.display = "none";
+      document.getElementById("registerBtn").disabled = false;
       window.location.reload(); // Refresh page on close
     }
   </script>
