@@ -1,239 +1,214 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Azure Service Principal Registration</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-  <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #f4f6f8;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      min-height: 100vh;
-      align-items: center;
-    }
-
-    .container {
-      background-color: #fff;
-      margin-top: 50px;
-      padding: 30px;
-      border-radius: 10px;
-      box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.1);
-      width: 90%;
-      max-width: 500px;
-    }
-
-    h1 {
-      text-align: center;
-      color: #333;
-      margin-bottom: 20px;
-    }
-
-    label {
-      display: block;
-      margin-bottom: 5px;
-      color: #444;
-      font-weight: bold;
-    }
-
-    input {
-      width: 100%;
-      padding: 10px;
-      margin-bottom: 20px;
-      border-radius: 6px;
-      border: 1px solid #ccc;
-      font-size: 14px;
-    }
-
-    button {
-      width: 100%;
-      padding: 12px;
-      background-color: #007bff;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      font-size: 16px;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background-color: #0056b3;
-    }
-
-    .result {
-      margin-top: 20px;
-      padding: 15px;
-      border-radius: 6px;
-      font-size: 15px;
-    }
-
-    .success {
-      background-color: #e6ffed;
-      color: #2e7d32;
-      border: 1px solid #a5d6a7;
-    }
-
-    .error {
-      background-color: #ffe6e6;
-      color: #d32f2f;
-      border: 1px solid #ef9a9a;
-    }
-
-    footer {
-      text-align: center;
-      margin-top: auto;
-      padding: 15px 0;
-      background-color: #333;
-      color: white;
-      width: 100%;
-      position: relative;
-      bottom: 0;
-    }
-
-    /* Modal styles */
-    #successModal {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.5);
-      z-index: 9999;
-    }
-
-    #successModalContent {
-      background: white;
-      padding: 20px;
-      max-width: 400px;
-      margin: 150px auto;
-      border-radius: 8px;
-      text-align: center;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    }
-
-    #successMessage {
-      margin-bottom: 20px;
-      font-size: 16px;
-      color: #2e7d32;
-    }
-
-    #closeModalBtn {
-      padding: 10px 20px;
-      background-color: #007bff;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    
-    /* ADDED STYLES FOR LOADING STATE */
-    .loading-text {
-        color: #007bff;
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Azure Service Principal Registration</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f4f6f8;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      align-items: center;
     }
 
-    button:disabled {
-        background-color: #a0c9e8;
-        cursor: not-allowed;
+    .container {
+      background-color: #fff;
+      margin-top: 50px;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.1);
+      width: 90%;
+      max-width: 500px;
     }
- </style>
+
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      color: #444;
+      font-weight: bold;
+    }
+
+    input {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 20px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+    }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    .result {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 6px;
+      font-size: 15px;
+    }
+
+    .success {
+      background-color: #e6ffed;
+      color: #2e7d32;
+      border: 1px solid #a5d6a7;
+    }
+
+    .error {
+      background-color: #ffe6e6;
+      color: #d32f2f;
+      border: 1px solid #ef9a9a;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: auto;
+      padding: 15px 0;
+      background-color: #333;
+      color: white;
+      width: 100%;
+      position: relative;
+      bottom: 0;
+    }
+
+    /* Modal styles */
+    #successModal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 9999;
+    }
+
+    #successModalContent {
+      background: white;
+      padding: 20px;
+      max-width: 400px;
+      margin: 150px auto;
+      border-radius: 8px;
+      text-align: center;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    #successMessage {
+      margin-bottom: 20px;
+      font-size: 16px;
+      color: #2e7d32;
+    }
+
+    #closeModalBtn {
+      padding: 10px 20px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+  </style>
 </head>
 <body>
 
-  <div class="container">
-    <h1>Register Azure Service Principal</h1>
-    <form id="createAppForm">
-      <label for="appName">Service Principal Name</label>
-      <input type="text" id="appName" name="app_name" required/>
+  <div class="container">
+    <h1>Register Azure Service Principal</h1>
+    <form id="createAppForm">
+      <label for="appName">Service Principal Name</label>
+      <input type="text" id="appName" name="app_name"/>
 
-      <label for="userName">Owner Name</label>
-      <input type="text" id="userName" name="user_name" pattern="[A-Za-z\s]+" title="Only letters and spaces allowed" required />
+      <label for="userName">Owner Name</label>
+      <input type="text" id="userName" name="user_name" pattern="[A-Za-z\s]+" title="Only letters and spaces allowed" />
 
-      <label for="userEmail">Owner Email</label>    
-      <input type="email" id="userEmail" name="user_email"
-       pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$"
-       title="Please enter a valid email address!" required>
+      <label for="userEmail">Owner Email</label>    
+      <input type="email" id="userEmail" name="user_email"
+       pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$"
+       title="Please enter a valid email address!">
 
-      <button type="submit" id="registerButton">Register</button>
-    </form>
+      <button type="submit">Register</button>
+    </form>
 
-    <div id="result" class="result" style="display: none;"></div>
-  </div>
+    <div id="result" class="result" style="display: none;"></div>
+  </div>
 
-    <div id="successModal">
-    <div id="successModalContent">
-      <p id="successMessage"></p>
-      <button id="closeModalBtn" onclick="closeModal()">OK</button>
-    </div>
-  </div>
+  <!-- Success Modal -->
+  <div id="successModal">
+    <div id="successModalContent">
+      <p id="successMessage"></p>
+      <button id="closeModalBtn" onclick="closeModal()">OK</button>
+    </div>
+  </div>
 
-  <footer>
-    <p>&#169; 2025 Azure Service Principal Automation Platform</p>
-  </footer>
+  <footer>
+    <p>&#169; 2025 Azure Service Principal Automation Platform</p>
+  </footer>
 
-<script>
-    document.addEventListener("DOMContentLoaded", function() {
-        // Reset form and clear result on page load
-        document.getElementById("createAppForm").reset();
-        document.getElementById("result").style.display = "none";
+  <script>
+    // Reset form and clear result on load
+    window.onload = function () {
+      document.getElementById("createAppForm").reset();
+      document.getElementById("result").style.display = "none";
+    };
 
-        // Handle form submission
-        document.getElementById("createAppForm").addEventListener("submit", function (event) {
-            event.preventDefault();
+    // Handle form submission
+    document.getElementById("createAppForm").addEventListener("submit", function (event) {
+      event.preventDefault();
 
-            const registerButton = document.getElementById("registerButton");
-            const resultDiv = document.getElementById("result");
-            
-            // 1. Immediately show the loading state
-            resultDiv.className = "result"; // Reset the class
-            resultDiv.style.display = "block";
-            resultDiv.innerHTML = '<span class="loading-text">Creating Service Principal... Please wait <i class="fa fa-spinner fa-spin"></i></span>';
-            registerButton.disabled = true;
+      const user_name = document.getElementById("userName").value;
+      const user_email = document.getElementById("userEmail").value;
+      const app_name = document.getElementById("appName").value;
 
-            const user_name = document.getElementById("userName").value;
-            const user_email = document.getElementById("userEmail").value;
-            const app_name = document.getElementById("appName").value;
+      fetch('/create_app', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          user_name: user_name,
+          user_email: user_email,
+          app_name: app_name
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        const resultDiv = document.getElementById("result");
 
-            // 2. Make the asynchronous call to the backend
-            fetch('/create_app', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    user_name: user_name,
-                    user_email: user_email,
-                    app_name: app_name
-                })
-            })
-            .then(response => {
-                return response.json().then(data => {
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Unknown error occurred.');
-                    }
-                    return data;
-                });
-            })
-            .then(data => {
-                // 3. On success, show the modal and hide the temporary message
-                resultDiv.style.display = "none";
-                showSuccessPopup(`✅ ${data.message}`);
-            })
-            .catch(error => {
-                // 4. On failure, show the error message in the result div
-                resultDiv.className = "result error";
-                resultDiv.innerHTML = `❌ ${error.message}`;
-                console.error('Error:', error);
-            })
-            .finally(() => {
-                // This block always runs, whether there's success or an error
-                registerButton.disabled = false;
-            });
-        });
+        if (data.error) {
+          resultDiv.className = "result error";
+          resultDiv.style.display = "block";
+          resultDiv.innerHTML = `❌ ${data.error}`;
+        } else {
+          showSuccessPopup(`✅ ${data.message}`);
+        }
+      })
+      .catch(error => {
+        const resultDiv = document.getElementById("result");
+        resultDiv.className = "result error";
+        resultDiv.style.display = "block";
+        resultDiv.innerHTML = "❌ Something went wrong. Please try again later.";
+      });
     });
 
     function showSuccessPopup(message) {
@@ -245,7 +220,7 @@
       document.getElementById("successModal").style.display = "none";
       window.location.reload(); // Refresh page on close
     }
-</script>
+  </script>
 
 </body>
 </html>
