@@ -151,6 +151,9 @@
     </form>
 
     <div id="result" class="result" style="display: none;"></div>
+    <div id="loading" class="result" style="display: none; text-align:center;">
+      <span id="loadingSpinner" style="font-size:22px;">⏳ Creating Azure Service Principal...</span>
+    </div>
   </div>
 
   <!-- Success Modal -->
@@ -180,6 +183,10 @@
       const user_email = document.getElementById("userEmail").value;
       const app_name = document.getElementById("appName").value;
 
+      // Show loading indicator
+      document.getElementById("loading").style.display = "block";
+      document.getElementById("result").style.display = "none";
+
       fetch('/create_app', {
         method: 'POST',
         headers: {
@@ -193,6 +200,7 @@
       })
       .then(response => response.json())
       .then(data => {
+        document.getElementById("loading").style.display = "none";
         const resultDiv = document.getElementById("result");
 
         if (data.error) {
@@ -204,6 +212,7 @@
         }
       })
       .catch(error => {
+        document.getElementById("loading").style.display = "none";
         const resultDiv = document.getElementById("result");
         resultDiv.className = "result error";
         resultDiv.style.display = "block";
