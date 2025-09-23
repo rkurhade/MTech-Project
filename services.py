@@ -85,7 +85,7 @@ class UserService:
         finally:
             conn.close()
 
-    def get_expiring_soon(self, days=3):
+    def get_expiring_soon(self, days=30):
         conn = self.db_config.connect()
         if conn is None:
             print("[ERROR] Could not establish DB connection")
@@ -99,7 +99,8 @@ class UserService:
             cursor.execute('''
                 SELECT user_name, email, app_name, expires_on
                 FROM user_info
-                WHERE expires_on BETWEEN ? AND ?
+                WHERE expires_on > SYSUTCDATETIME() -- not already expired
+                AND expires_on <= DATEADD(day, 30, SYSUTCDATETIME()) -- within next 30 days
                 AND notified_upcoming = 0
             ''', (now_utc, future_utc))
 
