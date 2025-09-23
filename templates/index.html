@@ -58,17 +58,11 @@
       border-radius: 6px;
       font-size: 16px;
       cursor: pointer;
-      transition: background-color 0.2s ease-in-out;
     }
 
     button:hover {
       background-color: #0056b3;
     }
-
-    button:disabled {
-        background-color: #a0c9e8;
-        cursor: not-allowed;
-    }
 
     .result {
       margin-top: 20px;
@@ -137,8 +131,14 @@
       cursor: pointer;
     }
     
+    /* ADDED STYLES FOR LOADING STATE */
     .loading-text {
         color: #007bff;
+    }
+
+    button:disabled {
+        background-color: #a0c9e8;
+        cursor: not-allowed;
     }
  </style>
 </head>
@@ -211,14 +211,11 @@
                 })
             })
             .then(response => {
-                // Return the promise from response.json() for chaining
                 return response.json().then(data => {
-                    // Check if the response was NOT successful (e.g., status 400 or 500)
                     if (!response.ok) {
-                        // Throw the error data to be caught by the .catch() block
                         throw new Error(data.error || 'Unknown error occurred.');
                     }
-                    return data; // Return the success data
+                    return data;
                 });
             })
             .then(data => {
