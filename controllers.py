@@ -1,12 +1,11 @@
 import pytz
 from flask_mail import Message
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 class AppController:
-    def __init__(self, db_config, azure_ad_client, user_service, mail):
+    def __init__(self, db_config, azure_ad_client, mail):
         self.db_config = db_config
         self.azure_ad_client = azure_ad_client
-        self.user_service = user_service
         self.mail = mail
         self.ist = pytz.timezone("Asia/Kolkata")
 
@@ -20,7 +19,7 @@ class AppController:
             <p>Please renew it before expiry to avoid disruption.</p>
             """
             subject_prefix = "[Upcoming Expiry]"
-        else:  # expired
+        else:
             message = f"""
             <p>Hi {user_name},</p>
             <p><strong>Action Required:</strong> Your Azure Service Principal secret for <strong>{app_name}</strong> expired on <strong>{expires_str}</strong> (IST).</p>
@@ -45,7 +44,8 @@ class AppController:
     # ----------------- Core Methods -----------------
     def create_application(self, user_name, email, app_name):
         self.db_config.validate()
-        if self.db_config.connect() is None:
+        conn = self.db_config.connect()
+        if not conn:
             return {'error': 'Failed to connect to database.'}, 500
 
         token = self.azure_ad_client.get_access_token()
@@ -66,10 +66,19 @@ class AppController:
 
         # Default expiry: 24 months
         expires_on = datetime.now(timezone.utc) + timedelta(days=730)
-        success = self.user_service.store_user_data(user_name, email, app_name, expires_on)
-        if not success:
+
+        # Store in DB directly
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO user_info (user_name, email, app_name, expires_on, notified_upcoming, notified_expired) "
+                "VALUES (%s, %s, %s, %s, 0, 0)",
+                (user_name, email, app_name, expires_on)
+            )
+            conn.commit()
+        except Exception as e:
             self.azure_ad_client.delete_application(token, client_id)
-            return {'error': 'Failed to store user data in the database.'}, 500
+            return {'error': f'Failed to store user data in DB: {str(e)}'}, 500
 
         expires_on_ist_str = expires_on.astimezone(self.ist).strftime('%Y-%m-%d %H:%M:%S')
         email_html = f"""
@@ -96,19 +105,40 @@ class AppController:
         }, 200
 
     def send_upcoming_expiry_notifications(self, days=30):
-        expiring_secrets = self.user_service.get_expiring_soon(days)
+        conn = self.db_config.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT user_name, email, app_name, expires_on FROM user_info "
+            "WHERE expires_on > UTC_TIMESTAMP() AND expires_on <= DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s DAY) "
+            "AND notified_upcoming = 0", (days,)
+        )
+        expiring_secrets = cursor.fetchall()
+
         for user_name, email, app_name, expires_on in expiring_secrets:
             html, subject_prefix = self._build_email_html(user_name, app_name, expires_on, type="upcoming")
             self._send_email(email, f"{subject_prefix} SP Secret for '{app_name}'", html)
-            self.user_service.mark_as_notified(app_name, column="notified_upcoming")
+            cursor.execute(
+                "UPDATE user_info SET notified_upcoming = 1 WHERE app_name = %s", (app_name,)
+            )
+        conn.commit()
 
         return {'message': f'Notifications sent for {len(expiring_secrets)} upcoming expiries.'}, 200
 
     def send_expired_notifications(self):
-        expired_secrets = self.user_service.get_expired_secrets()
+        conn = self.db_config.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT user_name, email, app_name, expires_on FROM user_info "
+            "WHERE expires_on <= UTC_TIMESTAMP() AND notified_expired = 0"
+        )
+        expired_secrets = cursor.fetchall()
+
         for user_name, email, app_name, expires_on in expired_secrets:
             html, subject_prefix = self._build_email_html(user_name, app_name, expires_on, type="expired")
             self._send_email(email, f"{subject_prefix} SP Secret for '{app_name}'", html)
-            self.user_service.mark_as_notified(app_name, column="notified_expired")
+            cursor.execute(
+                "UPDATE user_info SET notified_expired = 1 WHERE app_name = %s", (app_name,)
+            )
+        conn.commit()
 
         return {'message': f'Expired notifications sent to {len(expired_secrets)} user(s).'}, 200
