@@ -4,13 +4,13 @@ from clients import AzureADClient
 from controllers import AppController
 from flask_mail import Mail
 import re
+from datetime import timedelta
 
 # Setup Flask app
 app = Flask(__name__)
 
-# Load mail config from ConfigLoader
+# Load mail config
 mail_config = ConfigLoader.load_mail_config()
-
 app.config.update(
     MAIL_SERVER=mail_config['MAIL_SERVER'],
     MAIL_PORT=mail_config['MAIL_PORT'],
@@ -20,19 +20,17 @@ app.config.update(
     MAIL_PASSWORD=mail_config['MAIL_PASSWORD'],
     MAIL_DEFAULT_SENDER=mail_config['MAIL_DEFAULT_SENDER']
 )
-
 mail = Mail(app)
 
-# Load controller
-db_config = DatabaseConfig(ConfigLoader.load_db_config())
+# Load controller (no DB required)
 azure_ad_client = AzureADClient(ConfigLoader.load_azure_ad_config())
-app_controller = AppController(db_config, azure_ad_client, mail)
+app_controller = AppController(azure_ad_client, mail)
+
+EMAIL_REGEX = re.compile(r"^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$")
 
 @app.route('/')
 def home():
     return render_template('index.html')
-
-EMAIL_REGEX = re.compile(r"^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$")
 
 @app.route('/create_app', methods=['POST'])
 def create_app():
@@ -41,9 +39,8 @@ def create_app():
     email = data.get('user_email')
     app_name = data.get('app_name')
 
-    # Backend email format validation
     if not EMAIL_REGEX.match(email.lower()):
-        return jsonify({'error': 'Invalid email format provided.'}), 400
+        return jsonify({'error': 'Invalid email format.'}), 400
 
     response, status_code = app_controller.create_application(user_name, email, app_name)
     return jsonify(response), status_code
@@ -51,7 +48,7 @@ def create_app():
 @app.route('/notify_expiry', methods=['POST'])
 def notify_expiry():
     try:
-        days_before_expiry = int(request.args.get('days', 30)) 
+        days_before_expiry = int(request.args.get('days', 30))
         response, status = app_controller.send_upcoming_expiry_notifications(days_before_expiry)
         return jsonify(response), status
     except Exception as e:
@@ -67,5 +64,5 @@ def notify_expired():
 
 if __name__ == '__main__':
     import os
-    port = int(os.environ.get("PORT", 8000))  # Azure sets this
+    port = int(os.environ.get("PORT", 8000))
     app.run(host='0.0.0.0', port=port)
