@@ -2,7 +2,6 @@ import pyodbc
 from datetime import datetime, timedelta
 import pytz
 
-
 class DatabaseConfig:
     def __init__(self, config):
         self.server = config['server']
@@ -23,7 +22,6 @@ class DatabaseConfig:
                 f'UID={self.username};'
                 f'PWD={self.password}'
             )
-            print("[INFO] Connected to SQL Server DB successfully")
             return conn
         except Exception as e:
             print(f"[ERROR] Database connection error: {e}")
@@ -36,7 +34,7 @@ class UserService:
 
     def store_user_data(self, user_name, email, app_name, expires_on_utc):
         conn = self.db_config.connect()
-        if conn is None:
+        if not conn:
             print("[ERROR] Could not connect to DB to store user data.")
             return False
 
@@ -46,12 +44,14 @@ class UserService:
 
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO user_info (user_name, email, app_name, created_date, expires_on, notified_upcoming, notified_expired)
-                VALUES (?, ?, ?, GETDATE(), ?, 0, 0)
+                INSERT INTO user_info (
+                    user_name, email, app_name, created_date, expires_on,
+                    notified_upcoming, notified_expired, last_notified_at
+                )
+                VALUES (?, ?, ?, GETDATE(), ?, 0, 0, NULL)
             """, (user_name, email, app_name, expires_on_ist))
 
             conn.commit()
-            print(f"[INFO] Stored SPN data in DB for: {app_name}")
             return True
 
         except Exception as e:
@@ -61,36 +61,9 @@ class UserService:
         finally:
             conn.close()
 
-    def get_expired_secrets(self):
+    def get_expiring_soon(self, days=30):
         conn = self.db_config.connect()
-        if conn is None:
-            print("[ERROR] Could not establish DB connection")
-            return []
-
-        try:
-            cursor = conn.cursor()
-            now = datetime.now()
-
-            cursor.execute('''
-                SELECT user_name, email, app_name, expires_on
-                FROM user_info
-                WHERE expires_on < ?
-                AND notified_expired = 0
-            ''', (now,))
-
-            return cursor.fetchall()
-
-        except Exception as e:
-            print(f"[ERROR] Failed to fetch expired secrets: {e}")
-            return []
-
-        finally:
-            conn.close()
-
-    def get_expiring_soon(self, days=3):
-        conn = self.db_config.connect()
-        if conn is None:
-            print("[ERROR] Could not establish DB connection")
+        if not conn:
             return []
 
         try:
@@ -99,10 +72,10 @@ class UserService:
             future = now + timedelta(days=days)
 
             cursor.execute('''
-                SELECT user_name, email, app_name, expires_on
+                SELECT user_name, email, app_name, expires_on, last_notified_at
                 FROM user_info
                 WHERE expires_on BETWEEN ? AND ?
-                AND notified_upcoming = 0
+                AND (notified_upcoming = 0 OR last_notified_at <= DATEADD(day, -3, GETDATE()) OR last_notified_at IS NULL)
             ''', (now, future))
 
             return cursor.fetchall()
@@ -114,10 +87,34 @@ class UserService:
         finally:
             conn.close()
 
+    def get_expired_secrets(self):
+        conn = self.db_config.connect()
+        if not conn:
+            return []
+
+        try:
+            cursor = conn.cursor()
+            now = datetime.now()
+
+            cursor.execute('''
+                SELECT user_name, email, app_name, expires_on, last_notified_at
+                FROM user_info
+                WHERE expires_on < ?
+                AND (notified_expired = 0 OR last_notified_at <= DATEADD(day, -3, GETDATE()) OR last_notified_at IS NULL)
+            ''', (now,))
+
+            return cursor.fetchall()
+
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch expired secrets: {e}")
+            return []
+
+        finally:
+            conn.close()
+
     def mark_as_notified(self, app_name, column="notified_upcoming"):
         conn = self.db_config.connect()
-        if conn is None:
-            print("[ERROR] Could not connect to DB to update notified flag.")
+        if not conn:
             return
 
         try:
@@ -128,11 +125,10 @@ class UserService:
 
             cursor.execute(f"""
                 UPDATE user_info
-                SET {column} = 1
+                SET {column} = 1, last_notified_at = GETDATE()
                 WHERE app_name = ?
             """, (app_name,))
             conn.commit()
-            print(f"[INFO] Marked '{app_name}' as {column} = 1.")
         
         except Exception as e:
             print(f"[ERROR] Failed to update {column} flag for {app_name}: {e}")
