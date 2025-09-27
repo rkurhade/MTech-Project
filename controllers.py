@@ -1,20 +1,9 @@
 import pytz
 from flask_mail import Message
 from datetime import datetime, timedelta
+from datetime import timezone
 import os
-
-class AppController:
-    def __init__(self, db_config, azure_ad_client, user_service, mail):
-        self.db_config = db_config
-        self.azure_ad_client = azure_ad_client
-        self.user_service = user_service
-        self.mail = mail
-        self.ist = pytz.timezone("Asia/Kolkata")
-
-import pytz
-from flask_mail import Message
-from datetime import datetime, timedelta
-import os
+import requests
 
 class AppController:
     def __init__(self, db_config, azure_ad_client, user_service, mail):
@@ -55,21 +44,41 @@ class AppController:
             print("[ERROR] Failed to create SP.")
             return {'error': 'Failed to create Service Principal in Azure Entra ID.'}, 500
 
-        # ✅ Add owner assignment
+        # Add owner to the application
         try:
-            self.azure_ad_client.add_owner_to_application(token, client_id, email)
-            print(f"[INFO] Added {email} as owner to application {app_name}")
+            # 1. Get the app object id
+            app_obj = self.azure_ad_client.search_application(token, app_name)
+            app_object_id = app_obj['id'] if app_obj else None
+            if not app_object_id:
+                raise Exception("Could not find created app object id.")
+
+            # 2. Get the user object id by email
+            owner_object_id = self.azure_ad_client.get_user_object_id(token, email)
+            if not owner_object_id:
+                raise Exception(f"Could not find Azure AD user with email: {email}")
+
+            # 3. Add owner via Graph API
+            graph_url = f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/owners/$ref"
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            data = {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{owner_object_id}"}
+            resp = requests.post(graph_url, headers=headers, json=data)
+            if resp.status_code not in (204, 201):
+                print(f"[ERROR] Failed to add owner: {resp.status_code} {resp.text}")
+            else:
+                print(f"[INFO] Added owner {email} to app {app_name}")
         except Exception as e:
-            print(f"[WARN] Failed to add {email} as owner: {e}")
+            print(f"[ERROR] Could not add owner to app: {e}")
 
         # Determine expiry based on testing mode
         is_testing = os.environ.get("EXPIRY_TEST_MODE", "False").lower() == "true"
+        now_utc = datetime.now(timezone.utc)
+
         if is_testing:
-            print("[INFO] EXPIRY_TEST_MODE is ON: Using 1-minute expiry.")
-            expires_on = datetime.now(self.ist) + timedelta(minutes=1)
+            print("[INFO] EXPIRY_TEST_MODE is ON: Using 10-minute expiry.")
+            expires_on = now_utc + timedelta(minutes=10)
         else:
             print("[INFO] EXPIRY_TEST_MODE is OFF: Using 24-month expiry.")
-            expires_on = datetime.now(self.ist) + timedelta(days=730)
+            expires_on = now_utc + timedelta(days=730)
 
         success = self.user_service.store_user_data(user_name, email, app_name, expires_on)
         if not success:
@@ -78,7 +87,9 @@ class AppController:
             return {'error': 'Failed to store user data in the database.'}, 500
 
         tenant_id = self.azure_ad_client.tenant_id
-        expires_str = expires_on.strftime('%Y-%m-%d %H:%M:%S')
+        ist = pytz.timezone("Asia/Kolkata")
+        expires_on_ist_str = expires_on.astimezone(ist).strftime('%Y-%m-%d %H:%M:%S')
+
         email_body_html = f"""
         <html>
           <body style="font-family: Arial, sans-serif; color: #333;">
@@ -89,14 +100,15 @@ class AppController:
               <tr><td style="padding: 8px; font-weight: bold;">Client ID:</td><td style="padding: 8px;">{client_id}</td></tr>
               <tr><td style="padding: 8px; font-weight: bold;">Client Secret:</td><td style="padding: 8px;">{client_secret}</td></tr>
               <tr><td style="padding: 8px; font-weight: bold;">Tenant ID:</td><td style="padding: 8px;">{tenant_id}</td></tr>
-              <tr><td style="padding: 8px; font-weight: bold;">Secret Expiry (IST):</td><td style="padding: 8px;">{expires_str}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Secret Expiry (IST):</td><td style="padding: 8px;">{expires_on_ist_str}</td></tr>
             </table>
-            <p><strong>NOTE: Secret is valid for {'1 minute' if is_testing else '24 months'} from date of creation</strong>.</p>
+            <p><strong>NOTE: Secret is valid for {'10 minute' if is_testing else '24 months'} from date of creation</strong>.</p>
             <p><strong>Please store these credentials securely</strong>. Do not share them with unauthorized users.</p>
             <p>Best Regards,<br>Azure Service Principal Automation Team</p>
           </body>
         </html>
         """
+
         try:
             msg = Message(
                 subject=f"Azure Service Principal Credentials for '{app_name}'",
@@ -109,7 +121,7 @@ class AppController:
             return {'error': f'Failed to send email: {str(e)}'}, 500
 
         return {
-            'message': f"Azure Service Principal has been created successfully with name '{app_name}'. Credentials emailed to {email}.",
+            'message': f"Azure Service Principal has been created successfully with name '{app_name}'. Credentials have been emailed to {email}.",
             'client_id': client_id,
             'tenant_id': tenant_id,
         }, 200
