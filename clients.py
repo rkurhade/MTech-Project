@@ -1,3 +1,4 @@
+from wsgiref import headers
 import requests
 import os
 
@@ -110,3 +111,34 @@ class AzureADClient:
         else:
             print(f"[ERROR] Failed to delete app: {delete_response.status_code} - {delete_response.text}")
             return False
+
+    def add_owner_to_application(self, token, app_id, user_email):
+        """
+        Adds the given user email as an owner to the Azure AD app.
+        """
+        if self.mock:
+            print(f"[MOCK] Adding {user_email} as owner to app {app_id}")
+            return True
+
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+
+        # Get user ID by email
+        url_user = f"{self.graph_endpoint}/users/{user_email}"
+        resp_user = requests.get(url_user, headers=headers)
+        if not resp_user.ok:
+            raise Exception(f"Failed to get user ID for {user_email}: {resp_user.status_code} {resp_user.text}")
+
+        user_id = resp_user.json()['id']
+
+        # Add owner
+        url_owner = f"{self.graph_endpoint}/applications/{app_id}/owners/$ref"
+        body = {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{user_id}"}
+        resp_owner = requests.post(url_owner, headers=headers, json=body)
+        if resp_owner.status_code not in (200, 204):
+            raise Exception(f"Failed to add owner {user_email}: {resp_owner.status_code} {resp_owner.text}")
+
+        print(f"[INFO] Added {user_email} as owner to application {app_id}")
+        return True

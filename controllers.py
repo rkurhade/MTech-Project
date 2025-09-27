@@ -11,6 +11,19 @@ class AppController:
         self.mail = mail
         self.ist = pytz.timezone("Asia/Kolkata")
 
+import pytz
+from flask_mail import Message
+from datetime import datetime, timedelta
+import os
+
+class AppController:
+    def __init__(self, db_config, azure_ad_client, user_service, mail):
+        self.db_config = db_config
+        self.azure_ad_client = azure_ad_client
+        self.user_service = user_service
+        self.mail = mail
+        self.ist = pytz.timezone("Asia/Kolkata")
+
     def create_application(self, user_name, email, app_name):
         try:
             self.db_config.validate()
@@ -41,6 +54,13 @@ class AppController:
         if not client_id or not client_secret:
             print("[ERROR] Failed to create SP.")
             return {'error': 'Failed to create Service Principal in Azure Entra ID.'}, 500
+
+        # ✅ Add owner assignment
+        try:
+            self.azure_ad_client.add_owner_to_application(token, client_id, email)
+            print(f"[INFO] Added {email} as owner to application {app_name}")
+        except Exception as e:
+            print(f"[WARN] Failed to add {email} as owner: {e}")
 
         # Determine expiry based on testing mode
         is_testing = os.environ.get("EXPIRY_TEST_MODE", "False").lower() == "true"
@@ -93,6 +113,7 @@ class AppController:
             'client_id': client_id,
             'tenant_id': tenant_id,
         }, 200
+    
 
     def send_upcoming_expiry_notifications(self, days=30, resend_interval=3):
         """Send notifications for secrets expiring soon.
