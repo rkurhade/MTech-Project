@@ -115,6 +115,8 @@ class AzureADClient:
     def add_owner_to_application(self, token, app_id, user_email):
         """
         Adds the given user email as an owner to the Azure AD app.
+        Tries both /users/{user_email} and /users?$filter=mail eq '{user_email}'.
+        Prints full error responses for easier debugging.
         """
         if self.mock:
             print(f"[MOCK] Adding {user_email} as owner to app {app_id}")
@@ -125,20 +127,34 @@ class AzureADClient:
             'Content-Type': 'application/json'
         }
 
-        # Get user ID by email
+        # Try /users/{user_email} first
         url_user = f"{self.graph_endpoint}/users/{user_email}"
         resp_user = requests.get(url_user, headers=headers)
-        if not resp_user.ok:
-            raise Exception(f"Failed to get user ID for {user_email}: {resp_user.status_code} {resp_user.text}")
-
-        user_id = resp_user.json()['id']
+        if resp_user.ok:
+            user_id = resp_user.json().get('id')
+        else:
+            print(f"[WARN] /users/{{user_email}} failed: {resp_user.status_code} {resp_user.text}")
+            # Try /users?$filter=mail eq '{user_email}'
+            url_user2 = f"{self.graph_endpoint}/users?$filter=mail eq '{user_email}'"
+            resp_user2 = requests.get(url_user2, headers=headers)
+            if resp_user2.ok:
+                users = resp_user2.json().get('value', [])
+                if users:
+                    user_id = users[0].get('id')
+                else:
+                    print(f"[ERROR] No user found with mail eq '{user_email}'. Response: {resp_user2.text}")
+                    return False
+            else:
+                print(f"[ERROR] /users?$filter=mail eq failed: {resp_user2.status_code} {resp_user2.text}")
+                return False
 
         # Add owner
         url_owner = f"{self.graph_endpoint}/applications/{app_id}/owners/$ref"
         body = {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{user_id}"}
         resp_owner = requests.post(url_owner, headers=headers, json=body)
         if resp_owner.status_code not in (200, 204):
-            raise Exception(f"Failed to add owner {user_email}: {resp_owner.status_code} {resp_owner.text}")
+            print(f"[ERROR] Failed to add owner {user_email}: {resp_owner.status_code} {resp_owner.text}")
+            return False
 
         print(f"[INFO] Added {user_email} as owner to application {app_id}")
         return True
