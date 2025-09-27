@@ -46,26 +46,17 @@ class AppController:
 
         # Add owner to the application
         try:
-            # 1. Get the app object id
             app_obj = self.azure_ad_client.search_application(token, app_name)
             app_object_id = app_obj['id'] if app_obj else None
             if not app_object_id:
                 raise Exception("Could not find created app object id.")
 
-            # 2. Get the user object id by email
-            owner_object_id = self.azure_ad_client.get_user_object_id(token, email)
-            if not owner_object_id:
-                raise Exception(f"Could not find Azure AD user with email: {email}")
-
-            # 3. Add owner via Graph API
-            graph_url = f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/owners/$ref"
-            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-            data = {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{owner_object_id}"}
-            resp = requests.post(graph_url, headers=headers, json=data)
-            if resp.status_code not in (204, 201):
-                print(f"[ERROR] Failed to add owner: {resp.status_code} {resp.text}")
-            else:
+            # Use the client method to add owner by email
+            owner_result = self.azure_ad_client.add_owner_to_application(token, app_object_id, email)
+            if owner_result:
                 print(f"[INFO] Added owner {email} to app {app_name}")
+            else:
+                print(f"[ERROR] Failed to add owner {email} to app {app_name}")
         except Exception as e:
             print(f"[ERROR] Could not add owner to app: {e}")
 
