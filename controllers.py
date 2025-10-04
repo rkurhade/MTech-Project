@@ -44,14 +44,13 @@ class AppController:
             print("[ERROR] Failed to create SP.")
             return {'error': 'Failed to create Service Principal in Azure Entra ID.'}, 500
 
-        # Add owner to the application
+        # Add owner to the application (registered user)
         try:
             app_obj = self.azure_ad_client.search_application(token, app_name)
             app_object_id = app_obj['id'] if app_obj else None
             if not app_object_id:
                 raise Exception("Could not find created app object id.")
 
-            # Use the client method to add owner by email
             owner_result = self.azure_ad_client.add_owner_to_application(token, app_object_id, email)
             if owner_result:
                 print(f"[INFO] Added owner {email} to app {app_name}")
