@@ -30,8 +30,24 @@ REPEAT_NOTIFICATION_DAYS = 2
 # HELPER FUNCTIONS
 # =========================
 
+def get_sql_driver():
+    """Return the best available SQL Server ODBC driver installed."""
+    drivers = pyodbc.drivers()
+    for drv in ['ODBC Driver 18 for SQL Server', 'ODBC Driver 17 for SQL Server', 'SQL Server Native Client 11.0']:
+        if drv in drivers:
+            return drv
+    raise RuntimeError("No suitable SQL Server ODBC driver found. Install ODBC Driver 17 or 18.")
+
 def get_db_connection():
-    conn_str = f"DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={DB_CONFIG['server']};DATABASE={DB_CONFIG['database']};UID={DB_CONFIG['username']};PWD={DB_CONFIG['password']};Encrypt=yes;TrustServerCertificate=yes"
+    driver = get_sql_driver()
+    conn_str = (
+        f"DRIVER={{{driver}}};"
+        f"SERVER={DB_CONFIG['server']};"
+        f"DATABASE={DB_CONFIG['database']};"
+        f"UID={DB_CONFIG['username']};"
+        f"PWD={DB_CONFIG['password']};"
+        "Encrypt=yes;TrustServerCertificate=yes"
+    )
     return pyodbc.connect(conn_str)
 
 def get_graph_token():
