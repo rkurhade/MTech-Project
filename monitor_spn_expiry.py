@@ -1,189 +1,157 @@
 import datetime
-import os
-import requests
 import smtplib
+import pyodbc
+import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from services import DatabaseConfig
-from config import ConfigLoader
 
+# === Read from Azure App Service Environment Variables ===
+server = os.getenv("DB_SERVER")
+database = os.getenv("DB_DATABASE")
+username = os.getenv("DB_USERNAME")
+password = os.getenv("DB_PASSWORD")
 
-# ===============================
-# CONFIGURATION
-# ===============================
-db_config = DatabaseConfig(ConfigLoader.load_db_config())
-mail_config = ConfigLoader.load_mail_config()
-azure_config = ConfigLoader.load_azure_ad_config()
+smtp_server = os.getenv("MAIL_SERVER", "smtp.gmail.com")
+smtp_port = int(os.getenv("MAIL_PORT", 587))
+smtp_user = os.getenv("MAIL_USERNAME")
+smtp_pass = os.getenv("MAIL_PASSWORD")
+sender_email = os.getenv("MAIL_DEFAULT_SENDER", smtp_user)
 
-SMTP_USER = mail_config["MAIL_USERNAME"]
-SMTP_PASS = mail_config["MAIL_PASSWORD"]
+# === Validate DB Configuration ===
+missing = [k for k, v in {
+    "DB_SERVER": server,
+    "DB_DATABASE": database,
+    "DB_USERNAME": username,
+    "DB_PASSWORD": password,
+}.items() if not v]
+if missing:
+    raise EnvironmentError(f"❌ Missing DB config environment variables: {missing}")
 
-TENANT_ID = azure_config["tenant_id"]
-CLIENT_ID = azure_config["client_id"]
-CLIENT_SECRET = azure_config["client_secret"]
+# === Connect to SQL Database ===
+def get_connection():
+    return pyodbc.connect(
+        f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+        f"SERVER={server};DATABASE={database};UID={username};PWD={password};Encrypt=yes;TrustServerCertificate=no;"
+    )
 
-EXPIRY_THRESHOLD_DAYS = 30
-THROTTLE_DAYS = 2
-# ===============================
+# === Email Sending Function ===
+def send_email(to_email, subject, body_html):
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = sender_email
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body_html, "html"))
 
+        with smtplib.SMTP(smtp_server, smtp_port) as server_conn:
+            server_conn.starttls()
+            server_conn.login(smtp_user, smtp_pass)
+            server_conn.send_message(msg)
 
-def get_graph_token():
-    url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
-    data = {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "scope": "https://graph.microsoft.com/.default",
-        "grant_type": "client_credentials",
-    }
-    response = requests.post(url, data=data)
-    response.raise_for_status()
-    return response.json()["access_token"]
+        print(f"📧 Email sent successfully to {to_email} — {subject}")
+    except Exception as e:
+        print(f"⚠️ Failed to send email to {to_email}: {e}")
 
+# === Email Templates ===
+def expiring_email(user_name, app_name, expiry):
+    return f"""
+    <html><body>
+    <p>Hi {user_name},</p>
+    <p>⚠️ Your secret for <b>{app_name}</b> is expiring soon on <b>{expiry.strftime('%Y-%m-%d')}</b>.</p>
+    <p>Please renew it before it expires to avoid service disruption.</p>
+    <p>Best,<br>Azure Automation Team</p>
+    </body></html>
+    """
 
-def get_latest_secret_expiry(app_name, token):
-    url = f"https://graph.microsoft.com/v1.0/applications?$filter=displayName eq '{app_name}'&$select=passwordCredentials"
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(url, headers=headers)
+def expired_email(user_name, app_name, expiry):
+    return f"""
+    <html><body>
+    <p>Hi {user_name},</p>
+    <p>🚨 The secret for <b>{app_name}</b> expired on <b>{expiry.strftime('%Y-%m-%d')}</b>.</p>
+    <p>Please generate a new secret immediately and update dependent systems.</p>
+    <p>Best,<br>Azure Automation Team</p>
+    </body></html>
+    """
 
-    if response.status_code != 200:
-        print(f"⚠️ Failed Graph call for {app_name}: {response.text}")
-        return None
+def renewal_email(user_name, app_name, expiry):
+    return f"""
+    <html><body>
+    <p>Hi {user_name},</p>
+    <p>✅ The secret for <b>{app_name}</b> has been renewed successfully. New expiry: <b>{expiry.strftime('%Y-%m-%d')}</b>.</p>
+    <p>Thank you for keeping your credentials updated!</p>
+    <p>Best,<br>Azure Automation Team</p>
+    </body></html>
+    """
 
-    data = response.json()
-    if not data.get("value"):
-        return None
-
-    secrets = data["value"][0].get("passwordCredentials", [])
-    if not secrets:
-        return None
-
-    latest = max(datetime.datetime.fromisoformat(s["endDateTime"].replace("Z", "+00:00")) for s in secrets)
-    return latest
-
-
-def send_email(to_email, subject, html_body):
-    msg = MIMEMultipart()
-    msg["From"] = SMTP_USER
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(html_body, "html"))
-
-    with smtplib.SMTP(mail_config["MAIL_SERVER"], mail_config["MAIL_PORT"]) as server:
-        if mail_config["MAIL_USE_TLS"]:
-            server.starttls()
-        server.login(SMTP_USER, SMTP_PASS)
-        server.send_message(msg)
-
-    print(f"📧 Email sent → {to_email} | {subject}")
-
-
+# === Main Logic ===
 def main():
-    conn = db_config.connect()
-    if not conn:
-        print("❌ Database connection failed.")
-        return
-
+    conn = get_connection()
     cursor = conn.cursor()
+
     cursor.execute("""
-        SELECT id, user_name, email, app_name, latest_expiry_date,
-               notified_upcoming, notified_expired, notified_renewal_confirmed, last_notified_at
+        SELECT id, user_name, email, app_name, latest_expiry_date, 
+               notified_upcoming, notified_expired, notified_renewal_confirmed
         FROM dbo.user_info
     """)
     rows = cursor.fetchall()
 
-    token = get_graph_token()
     now = datetime.datetime.utcnow()
 
     for row in rows:
-        (
-            user_id,
-            user_name,
-            email,
-            app_name,
-            db_latest_expiry,
-            notified_upcoming,
-            notified_expired,
-            notified_renewal_confirmed,
-            last_notified_at
-        ) = row
+        (user_id, user_name, email, app_name, expiry,
+         notified_upcoming, notified_expired, renewal_confirmed) = row
 
-        latest_expiry = get_latest_secret_expiry(app_name, token)
-        if not latest_expiry:
+        if not expiry:
             continue
 
-        # Update Graph sync timestamp
-        cursor.execute("""
-            UPDATE dbo.user_info SET last_successful_graph_sync_at = SYSUTCDATETIME()
-            WHERE id = ?
-        """, user_id)
-        conn.commit()
+        days_to_expiry = (expiry - now).days
 
-        days_to_expiry = (latest_expiry - now).days
-        recently_notified = (
-            last_notified_at and (now - last_notified_at).days < THROTTLE_DAYS
-        )
-
-        # ✅ Renewal detected
-        if db_latest_expiry and latest_expiry > db_latest_expiry and not notified_renewal_confirmed:
+        # === Case 1: Expiring soon ===
+        if 0 < days_to_expiry <= 7 and not notified_upcoming:
             send_email(
                 email,
-                f"✅ Secret renewed for {app_name}",
-                f"<p>Hi {user_name},</p>"
-                f"<p>Your secret for <b>{app_name}</b> has been renewed successfully.</p>"
-                f"<p>New Expiry Date: {latest_expiry.strftime('%Y-%m-%d')}</p>"
+                f"⚠️ SPN Secret Expiring Soon for {app_name}",
+                expiring_email(user_name, app_name, expiry)
             )
             cursor.execute("""
-                UPDATE dbo.user_info
-                SET latest_expiry_date=?, notified_renewal_confirmed=1,
-                    notified_upcoming=0, notified_expired=0,
+                UPDATE dbo.user_info 
+                SET notified_upcoming=1, last_notified_at=SYSUTCDATETIME() 
+                WHERE id=?
+            """, user_id)
+
+        # === Case 2: Already expired ===
+        elif expiry < now and not notified_expired:
+            send_email(
+                email,
+                f"🚨 SPN Secret Expired for {app_name}",
+                expired_email(user_name, app_name, expiry)
+            )
+            cursor.execute("""
+                UPDATE dbo.user_info 
+                SET notified_expired=1, last_notified_at=SYSUTCDATETIME() 
+                WHERE id=?
+            """, user_id)
+
+        # === Case 3: Renewal confirmation ===
+        elif expiry > now and notified_expired and not renewal_confirmed:
+            send_email(
+                email,
+                f"✅ SPN Secret Renewed for {app_name}",
+                renewal_email(user_name, app_name, expiry)
+            )
+            cursor.execute("""
+                UPDATE dbo.user_info 
+                SET notified_renewal_confirmed=1, 
+                    notified_expired=0, 
+                    notified_upcoming=0, 
                     last_notified_at=SYSUTCDATETIME()
                 WHERE id=?
-            """, (latest_expiry, user_id))
-            conn.commit()
-            continue
-
-        # 🔄 Keep DB expiry updated
-        if not db_latest_expiry or latest_expiry != db_latest_expiry:
-            cursor.execute("""
-                UPDATE dbo.user_info SET latest_expiry_date=? WHERE id=?
-            """, (latest_expiry, user_id))
-            conn.commit()
-
-        # ⚠️ Expiring soon
-        if 0 < days_to_expiry <= EXPIRY_THRESHOLD_DAYS and not notified_upcoming and not recently_notified:
-            send_email(
-                email,
-                f"⚠️ Secret expiring soon for {app_name}",
-                f"<p>Hi {user_name},</p>"
-                f"<p>The secret for <b>{app_name}</b> will expire on {latest_expiry.strftime('%Y-%m-%d')}.</p>"
-                f"<p>Please renew it to avoid service interruption.</p>"
-            )
-            cursor.execute("""
-                UPDATE dbo.user_info
-                SET notified_upcoming=1, last_notified_at=SYSUTCDATETIME()
-                WHERE id=?
             """, user_id)
-            conn.commit()
 
-        # 🚨 Already expired
-        elif latest_expiry < now and not notified_expired and not recently_notified:
-            send_email(
-                email,
-                f"🚨 Secret expired for {app_name}",
-                f"<p>Hi {user_name},</p>"
-                f"<p>The secret for <b>{app_name}</b> expired on {latest_expiry.strftime('%Y-%m-%d')}.</p>"
-                f"<p>Please create a new secret immediately.</p>"
-            )
-            cursor.execute("""
-                UPDATE dbo.user_info
-                SET notified_expired=1, last_notified_at=SYSUTCDATETIME()
-                WHERE id=?
-            """, user_id)
-            conn.commit()
-
+    conn.commit()
     conn.close()
-    print("✅ SPN expiry monitoring complete.")
+    print("✅ Secret monitoring check completed successfully.")
 
-
+# === Entry point for Azure WebJob or Scheduler ===
 if __name__ == "__main__":
     main()
