@@ -1,6 +1,5 @@
 import pyodbc
 from datetime import datetime, timedelta, timezone
-import pytz
 import os
 import smtplib
 from email.mime.text import MIMEText
@@ -39,21 +38,22 @@ class UserService:
     def __init__(self, db_config):
         self.db_config = db_config
 
-    def get_expiring_soon(self, days=7):
+    # Fetch secrets expiring in next 30 days and check last notification for repeat
+    def get_expiring_soon(self, days=30, repeat_interval=2):
         conn = self.db_config.connect()
         if not conn:
             return []
 
         try:
             cursor = conn.cursor()
-            now = datetime.now(timezone.utc)  # timezone-aware UTC
+            now = datetime.now(timezone.utc)
             future = now + timedelta(days=days)
             cursor.execute('''
-                SELECT id, user_name, email, app_name, expires_on, notified_upcoming
+                SELECT id, user_name, email, app_name, client_id, expires_on, notified_upcoming, last_notified_at
                 FROM user_info
                 WHERE expires_on BETWEEN ? AND ?
-                AND (notified_upcoming = 0 OR last_notified_at IS NULL)
-            ''', (now, future))
+                AND (notified_upcoming = 0 OR last_notified_at IS NULL OR last_notified_at <= DATEADD(day, -?, GETDATE()))
+            ''', (now, future, repeat_interval))
             return cursor.fetchall()
         except Exception as e:
             print(f"[ERROR] Failed to fetch upcoming expiring secrets: {e}")
@@ -61,20 +61,21 @@ class UserService:
         finally:
             conn.close()
 
-    def get_expired_secrets(self):
+    # Fetch secrets already expired and not yet notified or due for repeat
+    def get_expired_secrets(self, repeat_interval=2):
         conn = self.db_config.connect()
         if not conn:
             return []
 
         try:
             cursor = conn.cursor()
-            now = datetime.now(timezone.utc)  # timezone-aware UTC
+            now = datetime.now(timezone.utc)
             cursor.execute('''
-                SELECT id, user_name, email, app_name, expires_on, notified_expired
+                SELECT id, user_name, email, app_name, client_id, expires_on, notified_expired, last_notified_at
                 FROM user_info
                 WHERE expires_on < ?
-                AND (notified_expired = 0 OR last_notified_at IS NULL)
-            ''', (now,))
+                AND (notified_expired = 0 OR last_notified_at IS NULL OR last_notified_at <= DATEADD(day, -?, GETDATE()))
+            ''', (now, repeat_interval))
             return cursor.fetchall()
         except Exception as e:
             print(f"[ERROR] Failed to fetch expired secrets: {e}")
@@ -82,13 +83,14 @@ class UserService:
         finally:
             conn.close()
 
+    # Mark a secret as notified
     def mark_as_notified(self, secret_id, column):
         conn = self.db_config.connect()
         if not conn:
             return
         try:
             cursor = conn.cursor()
-            if column not in ["notified_upcoming", "notified_expired"]:
+            if column not in ["notified_upcoming", "notified_expired", "notified_renewal"]:
                 print(f"[ERROR] Invalid column name: {column}")
                 return
             cursor.execute(f'''
@@ -102,7 +104,7 @@ class UserService:
         finally:
             conn.close()
 
-# === Email Helper Functions ===
+# === Email Setup ===
 smtp_server = os.getenv("MAIL_SERVER", "smtp.gmail.com")
 smtp_port = int(os.getenv("MAIL_PORT", 587))
 smtp_user = os.getenv("MAIL_USERNAME")
@@ -126,21 +128,31 @@ def send_email(to_email, subject, body_html):
     except Exception as e:
         print(f"⚠️ Failed to send email to {to_email}: {e}")
 
-def expiring_email(user_name, app_name, expiry):
+# === Email Templates ===
+def expiring_email(user_name, app_name, client_id, expiry):
     return f"""
     <html><body>
     <p>Hi {user_name},</p>
-    <p>⚠️ Your secret for <b>{app_name}</b> is expiring soon on <b>{expiry.strftime('%Y-%m-%d')}</b>.</p>
+    <p>⚠️ Your secret <b>{client_id}</b> for <b>{app_name}</b> is expiring soon on <b>{expiry.strftime('%Y-%m-%d')}</b>.</p>
     <p>Please renew it before it expires.</p>
     </body></html>
     """
 
-def expired_email(user_name, app_name, expiry):
+def expired_email(user_name, app_name, client_id, expiry):
     return f"""
     <html><body>
     <p>Hi {user_name},</p>
-    <p>🚨 The secret for <b>{app_name}</b> expired on <b>{expiry.strftime('%Y-%m-%d')}</b>.</p>
+    <p>🚨 The secret <b>{client_id}</b> for <b>{app_name}</b> expired on <b>{expiry.strftime('%Y-%m-%d')}</b>.</p>
     <p>Please generate a new secret immediately.</p>
+    </body></html>
+    """
+
+def renewal_email(user_name, app_name, client_id, expiry):
+    return f"""
+    <html><body>
+    <p>Hi {user_name},</p>
+    <p>✅ The secret <b>{client_id}</b> for <b>{app_name}</b> has been renewed. New expiry: <b>{expiry.strftime('%Y-%m-%d')}</b>.</p>
+    <p>Thank you for updating your secret!</p>
     </body></html>
     """
 
@@ -155,19 +167,41 @@ def main():
     db_config.validate()
     user_service = UserService(db_config)
 
-    # Expiring soon
-    for s in user_service.get_expiring_soon(days=7):
-        secret_id, user_name, email, app_name, expires_on, notified = s
-        send_email(email, f"⚠️ Secret Expiring Soon for {app_name}", expiring_email(user_name, app_name, expires_on))
+    # --- Expiring soon (30 days notice, repeat every 2 days) ---
+    for s in user_service.get_expiring_soon(days=30, repeat_interval=2):
+        secret_id, user_name, email, app_name, client_id, expires_on, notified_upcoming, last_notified_at = s
+        send_email(email, f"⚠️ Secret Expiring Soon: {app_name}", expiring_email(user_name, app_name, client_id, expires_on))
         user_service.mark_as_notified(secret_id, "notified_upcoming")
 
-    # Already expired
-    for s in user_service.get_expired_secrets():
-        secret_id, user_name, email, app_name, expires_on, notified = s
-        send_email(email, f"🚨 Secret Expired for {app_name}", expired_email(user_name, app_name, expires_on))
+    # --- Already expired (repeat every 2 days until renewal) ---
+    for s in user_service.get_expired_secrets(repeat_interval=2):
+        secret_id, user_name, email, app_name, client_id, expires_on, notified_expired, last_notified_at = s
+        send_email(email, f"🚨 Secret Expired: {app_name}", expired_email(user_name, app_name, client_id, expires_on))
         user_service.mark_as_notified(secret_id, "notified_expired")
 
-    print("✅ Secret monitoring check completed.")
+    # --- Renewal confirmation ---
+    # Fetch secrets that were expired but now renewed (expires_on in future)
+    conn = db_config.connect()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            now = datetime.now(timezone.utc)
+            cursor.execute('''
+                SELECT id, user_name, email, app_name, client_id, expires_on, notified_expired, notified_renewal
+                FROM user_info
+                WHERE expires_on >= ?
+                AND notified_expired = 1
+                AND (notified_renewal IS NULL OR notified_renewal = 0)
+            ''', (now,))
+            renewed_secrets = cursor.fetchall()
+            for s in renewed_secrets:
+                secret_id, user_name, email, app_name, client_id, expires_on, notified_expired, notified_renewal = s
+                send_email(email, f"✅ Secret Renewed: {app_name}", renewal_email(user_name, app_name, client_id, expires_on))
+                user_service.mark_as_notified(secret_id, "notified_renewal")
+        finally:
+            conn.close()
+
+    print("✅ Secret monitoring check completed successfully.")
 
 # === Entry Point ===
 if __name__ == "__main__":
