@@ -1,6 +1,7 @@
-from wsgiref import headers
+# clients.py
 import requests
 import os
+from datetime import datetime # NEW: Import for creating unique secret names
 
 class AzureADClient:
     def __init__(self, config):
@@ -158,3 +159,58 @@ class AzureADClient:
 
         print(f"[INFO] Added {user_email} as owner to application {app_id}")
         return True
+
+    # NEW: Method to add a new secret to an existing application (for renewal)
+    def add_password_to_application(self, token, app_object_id, app_name):
+        """
+        Adds a new password (client secret) to an existing Azure AD application.
+        """
+        if self.mock:
+            print(f"[MOCK] Adding new secret to existing app: {app_name}")
+            return f"mock-new-secret-{app_name}"
+
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+        # Using a unique display name for the new secret
+        secret_display_name = f"{app_name} secret - {datetime.now().strftime('%Y-%m-%d')}"
+        secret_data = {"passwordCredential": {"displayName": secret_display_name}}
+        
+        url = f"{self.graph_endpoint}/applications/{app_object_id}/addPassword"
+        secret_response = requests.post(url, headers=headers, json=secret_data)
+        
+        if secret_response.ok:
+            client_secret = secret_response.json().get('secretText')
+            return client_secret
+
+        print(f"[ERROR] Failed to add new password: {secret_response.status_code} - {secret_response.text}")
+        return None
+
+    # NEW: Method to get an application's details including all its secrets
+    def get_application_with_secrets(self, token, app_name):
+        """
+        Searches for an application and returns its details, including passwordCredentials.
+        """
+        if self.mock:
+            print(f"[MOCK] Returning fake app with secrets for: {app_name}")
+            mock_end_date = (datetime.now() + timedelta(days=30)).isoformat() + "Z"
+            return {
+                "id": f"mock-id-{app_name}",
+                "displayName": app_name,
+                "passwordCredentials": [{"endDateTime": mock_end_date, "keyId": "mock-key-id"}]
+            }
+
+        # The $select parameter is crucial for efficiency
+        url = f"{self.graph_endpoint}/applications?$filter=displayName eq '{app_name}'&$select=id,displayName,passwordCredentials"
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            if data['value']:
+                return data['value'][0]  # Return the first matching app with its secrets
+            return None
+        except requests.exceptions.RequestException as err:
+            print(f"[ERROR] Failed to get application with secrets: {err}")
+        return None

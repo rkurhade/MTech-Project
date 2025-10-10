@@ -1,3 +1,4 @@
+# app.py
 from flask import Flask, render_template, request, jsonify
 from config import ConfigLoader
 from clients import AzureADClient
@@ -52,11 +53,25 @@ def create_app():
     response, status_code = app_controller.create_application(user_name, email, app_name)
     return jsonify(response), status_code
 
+# NEW: Route to renew a secret for an existing application
+@app.route('/renew_app_secret', methods=['POST'])
+def renew_secret():
+    data = request.json
+    app_name = data.get('app_name')
+
+    if not app_name:
+        return jsonify({'error': 'Application name is required.'}), 400
+
+    response, status_code = app_controller.renew_application_secret(app_name)
+    return jsonify(response), status_code
+
+# UPDATED: Now uses a 2-day resend interval by default
 @app.route('/notify_expiry', methods=['POST'])
 def notify_expiry():
     try:
         days_before_expiry = int(request.args.get('days', 30))
-        response, status = app_controller.send_upcoming_expiry_notifications(days_before_expiry)
+        # The resend interval is now 2 days as per your requirement
+        response, status = app_controller.send_upcoming_expiry_notifications(days_before_expiry, resend_interval_days=2)
         return jsonify(response), status
     except Exception as e:
         return jsonify({'error': str(e)}), 500

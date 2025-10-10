@@ -1,3 +1,4 @@
+# services.py
 import pyodbc
 from datetime import datetime, timedelta
 import pytz
@@ -61,6 +62,79 @@ class UserService:
         finally:
             conn.close()
 
+    # NEW: Fetches all applications for the notification check
+    def get_all_applications(self):
+        """Fetches all applications to check their secret expiry status."""
+        conn = self.db_config.connect()
+        if not conn:
+            return []
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, user_name, email, app_name, last_notified_at
+                FROM user_info
+            """)
+            # Convert rows to a list of dictionaries for easier access
+            columns = [column[0] for column in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch all applications: {e}")
+            return []
+        finally:
+            conn.close()
+
+    # NEW: Updates the expiry date and resets notification flags for an app
+    def update_application_expiry(self, app_id, new_expiry_date_utc):
+        """Updates the expiry date and resets notification flags for an app."""
+        conn = self.db_config.connect()
+        if not conn:
+            return False
+        try:
+            ist_tz = pytz.timezone("Asia/Kolkata")
+            new_expiry_ist = new_expiry_date_utc.astimezone(ist_tz).replace(tzinfo=None)
+
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE user_info
+                SET expires_on = ?, notified_upcoming = 0, notified_expired = 0, last_notified_at = NULL
+                WHERE id = ?
+            """, (new_expiry_ist, app_id))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"[ERROR] Failed to update expiry for app_id {app_id}: {e}")
+            return False
+        finally:
+            conn.close()
+
+    # UPDATED: Now uses app_id instead of app_name for reliability
+    def mark_as_notified(self, app_id, column="notified_upcoming"):
+        conn = self.db_config.connect()
+        if not conn:
+            return
+
+        try:
+            cursor = conn.cursor()
+            if column not in ["notified_upcoming", "notified_expired"]:
+                print(f"[ERROR] Invalid column name: {column}")
+                return
+
+            cursor.execute(f"""
+                UPDATE user_info
+                SET {column} = 1, last_notified_at = GETDATE()
+                WHERE id = ?
+            """, (app_id,))
+            conn.commit()
+        
+        except Exception as e:
+            print(f"[ERROR] Failed to update {column} flag for app_id {app_id}: {e}")
+        
+        finally:
+            conn.close()
+
+    # NOTE: The get_expiring_soon and get_expired_secrets methods are no longer used
+    # by the main notification logic but are kept here in case they are used elsewhere.
     def get_expiring_soon(self, days=30):
         conn = self.db_config.connect()
         if not conn:
@@ -109,29 +183,5 @@ class UserService:
             print(f"[ERROR] Failed to fetch expired secrets: {e}")
             return []
 
-        finally:
-            conn.close()
-
-    def mark_as_notified(self, app_name, column="notified_upcoming"):
-        conn = self.db_config.connect()
-        if not conn:
-            return
-
-        try:
-            cursor = conn.cursor()
-            if column not in ["notified_upcoming", "notified_expired"]:
-                print(f"[ERROR] Invalid column name: {column}")
-                return
-
-            cursor.execute(f"""
-                UPDATE user_info
-                SET {column} = 1, last_notified_at = GETDATE()
-                WHERE app_name = ?
-            """, (app_name,))
-            conn.commit()
-        
-        except Exception as e:
-            print(f"[ERROR] Failed to update {column} flag for {app_name}: {e}")
-        
         finally:
             conn.close()
