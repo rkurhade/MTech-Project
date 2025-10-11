@@ -34,7 +34,7 @@ class UserService:
         self.db_config = db_config
 
 
-    def store_user_data(self, user_name, email, app_name, expires_on_utc):
+    def store_user_data(self, user_name, email, app_name, expires_on_utc, key_id=None, end_date=None):
         conn = self.db_config.connect()
         if not conn:
             print("[ERROR] Could not connect to DB to store user data.")
@@ -48,16 +48,17 @@ class UserService:
             cursor.execute("""
                 INSERT INTO user_info (
                     user_name, email, app_name, created_date, expires_on,
-                    notified_upcoming, notified_expired, last_notified_at
+                    notified_upcoming, notified_expired, last_notified_at, notified_renewal
                 )
-                VALUES (?, ?, ?, GETDATE(), ?, 0, 0, NULL)
+                VALUES (?, ?, ?, GETDATE(), ?, 0, 0, NULL, 0)
             """, (user_name, email, app_name, expires_on_ist))
-            # Insert into app_secrets
-            cursor.execute("""
-                INSERT INTO app_secrets (
-                    app_name, expires_on, created_date
-                ) VALUES (?, ?, GETDATE())
-            """, (app_name, expires_on_ist))
+            # Insert into app_secrets with all required NOT NULL columns
+            if key_id and end_date:
+                cursor.execute("""
+                    INSERT INTO app_secrets (
+                        app_name, key_id, end_date, created_date
+                    ) VALUES (?, ?, ?, GETDATE())
+                """, (app_name, key_id, end_date))
             conn.commit()
             return True
         except Exception as e:
@@ -90,7 +91,7 @@ class UserService:
 
     # NEW: Updates the expiry date and resets notification flags for an app
 
-    def update_application_expiry(self, app_id, new_expiry_date_utc, app_name=None):
+    def update_application_expiry(self, app_id, new_expiry_date_utc, app_name=None, key_id=None):
         """Updates the expiry date and resets notification flags for an app, and adds a new secret entry."""
         conn = self.db_config.connect()
         if not conn:
@@ -105,13 +106,13 @@ class UserService:
                 SET expires_on = ?, notified_upcoming = 0, notified_expired = 0, last_notified_at = NULL
                 WHERE id = ?
             """, (new_expiry_ist, app_id))
-            # Insert new secret into app_secrets if app_name is provided
-            if app_name:
+            # Insert new secret into app_secrets if app_name and key_id are provided
+            if app_name and key_id:
                 cursor.execute("""
                     INSERT INTO app_secrets (
-                        app_name, expires_on, created_date
-                    ) VALUES (?, ?, GETDATE())
-                """, (app_name, new_expiry_ist))
+                        app_name, key_id, end_date, created_date
+                    ) VALUES (?, ?, ?, GETDATE())
+                """, (app_name, key_id, new_expiry_ist))
             conn.commit()
             return True
         except Exception as e:
