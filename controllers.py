@@ -70,7 +70,15 @@ class AppController:
             print("[INFO] EXPIRY_TEST_MODE is OFF: Using 24-month expiry.")
             expires_on = now_utc + timedelta(days=730)
 
-        success = self.user_service.store_user_data(user_name, email, app_name, expires_on)
+        # Get key_id and end_date from Azure response
+        app_obj_with_secrets = self.azure_ad_client.get_application_with_secrets(token, app_name)
+        key_id = None
+        end_date = None
+        if app_obj_with_secrets and app_obj_with_secrets.get('passwordCredentials'):
+            latest_secret = max(app_obj_with_secrets['passwordCredentials'], key=lambda s: s['endDateTime'])
+            key_id = latest_secret.get('keyId')
+            end_date = datetime.fromisoformat(latest_secret['endDateTime'].replace('Z','+00:00'))
+        success = self.user_service.store_user_data(user_name, email, app_name, expires_on, key_id=key_id, end_date=end_date)
         if not success:
             print("[ERROR] Failed to store user data.")
             self.azure_ad_client.delete_application(token, client_id)
@@ -154,7 +162,13 @@ class AppController:
             print(f"[ERROR] Could not find app '{app_name}' in local database.")
             return {'error': 'Secret created in Azure, but could not update local database. Please contact support.'}, 500
 
-        db_update_success = self.user_service.update_application_expiry(db_app_record['id'], new_expiry_date, app_name=app_name)
+        # Get key_id from Azure response for the new secret
+        app_obj_with_secrets = self.azure_ad_client.get_application_with_secrets(token, app_name)
+        key_id = None
+        if app_obj_with_secrets and app_obj_with_secrets.get('passwordCredentials'):
+            latest_secret = max(app_obj_with_secrets['passwordCredentials'], key=lambda s: s['endDateTime'])
+            key_id = latest_secret.get('keyId')
+        db_update_success = self.user_service.update_application_expiry(db_app_record['id'], new_expiry_date, app_name=app_name, key_id=key_id)
         if not db_update_success:
             print(f"[ERROR] Failed to update local DB for app: {app_name}")
             return {'error': 'Failed to update local database.'}, 500
