@@ -154,7 +154,7 @@ class AppController:
             print(f"[ERROR] Could not find app '{app_name}' in local database.")
             return {'error': 'Secret created in Azure, but could not update local database. Please contact support.'}, 500
 
-        db_update_success = self.user_service.update_application_expiry(db_app_record['id'], new_expiry_date)
+        db_update_success = self.user_service.update_application_expiry(db_app_record['id'], new_expiry_date, app_name=app_name)
         if not db_update_success:
             print(f"[ERROR] Failed to update local DB for app: {app_name}")
             return {'error': 'Failed to update local database.'}, 500
