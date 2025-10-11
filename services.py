@@ -33,6 +33,7 @@ class UserService:
     def __init__(self, db_config):
         self.db_config = db_config
 
+
     def store_user_data(self, user_name, email, app_name, expires_on_utc):
         conn = self.db_config.connect()
         if not conn:
@@ -42,8 +43,8 @@ class UserService:
         try:
             ist_tz = pytz.timezone("Asia/Kolkata")
             expires_on_ist = expires_on_utc.astimezone(ist_tz).replace(tzinfo=None)
-
             cursor = conn.cursor()
+            # Insert into user_info
             cursor.execute("""
                 INSERT INTO user_info (
                     user_name, email, app_name, created_date, expires_on,
@@ -51,14 +52,17 @@ class UserService:
                 )
                 VALUES (?, ?, ?, GETDATE(), ?, 0, 0, NULL)
             """, (user_name, email, app_name, expires_on_ist))
-
+            # Insert into app_secrets
+            cursor.execute("""
+                INSERT INTO app_secrets (
+                    app_name, expires_on, created_date
+                ) VALUES (?, ?, GETDATE())
+            """, (app_name, expires_on_ist))
             conn.commit()
             return True
-
         except Exception as e:
-            print(f"[ERROR] Failed to insert SPN data: {e}")
+            print(f"[ERROR] Failed to insert SPN/app_secret data: {e}")
             return False
-
         finally:
             conn.close()
 
@@ -85,21 +89,29 @@ class UserService:
             conn.close()
 
     # NEW: Updates the expiry date and resets notification flags for an app
-    def update_application_expiry(self, app_id, new_expiry_date_utc):
-        """Updates the expiry date and resets notification flags for an app."""
+
+    def update_application_expiry(self, app_id, new_expiry_date_utc, app_name=None):
+        """Updates the expiry date and resets notification flags for an app, and adds a new secret entry."""
         conn = self.db_config.connect()
         if not conn:
             return False
         try:
             ist_tz = pytz.timezone("Asia/Kolkata")
             new_expiry_ist = new_expiry_date_utc.astimezone(ist_tz).replace(tzinfo=None)
-
             cursor = conn.cursor()
+            # Update user_info
             cursor.execute("""
                 UPDATE user_info
                 SET expires_on = ?, notified_upcoming = 0, notified_expired = 0, last_notified_at = NULL
                 WHERE id = ?
             """, (new_expiry_ist, app_id))
+            # Insert new secret into app_secrets if app_name is provided
+            if app_name:
+                cursor.execute("""
+                    INSERT INTO app_secrets (
+                        app_name, expires_on, created_date
+                    ) VALUES (?, ?, GETDATE())
+                """, (app_name, new_expiry_ist))
             conn.commit()
             return True
         except Exception as e:
