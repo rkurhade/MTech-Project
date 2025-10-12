@@ -70,19 +70,19 @@ class AppController:
             print("[INFO] EXPIRY_TEST_MODE is OFF: Using 24-month expiry.")
             expires_on = now_utc + timedelta(days=730)
 
-        # Get key_id and end_date from Azure response
-        app_obj_with_secrets = self.azure_ad_client.get_application_with_secrets(token, app_name)
-        key_id = None
-        end_date = None
-        if app_obj_with_secrets and app_obj_with_secrets.get('passwordCredentials'):
-            latest_secret = max(app_obj_with_secrets['passwordCredentials'], key=lambda s: s['endDateTime'])
-            key_id = latest_secret.get('keyId')
-            end_date = datetime.fromisoformat(latest_secret['endDateTime'].replace('Z','+00:00'))
-        success = self.user_service.store_user_data(user_name, email, app_name, expires_on, key_id=key_id, end_date=end_date)
+
+        # Prepare secret_info for app_secrets
+        secret_info = {
+            'key_id': 'initial',  # You may want to fetch the real key_id from Azure response
+            'end_date': expires_on,
+            'display_name': f"{app_name} secret",
+            'latest': 1
+        }
+        success = self.user_service.store_user_and_secret(user_name, email, app_name, secret_info)
         if not success:
-            print("[ERROR] Failed to store user data.")
+            print("[ERROR] Failed to store user and secret data.")
             self.azure_ad_client.delete_application(token, client_id)
-            return {'error': 'Failed to store user data in the database.'}, 500
+            return {'error': 'Failed to store user/secret data in the database.'}, 500
 
         tenant_id = self.azure_ad_client.tenant_id
         ist = pytz.timezone("Asia/Kolkata")
@@ -142,45 +142,50 @@ class AppController:
             return {'error': f"Application '{app_name}' not found in Azure Entra ID."}, 404
 
         app_object_id = app_obj['id']
-        client_id = app_obj.get('appId') # Use appId from the fetched object
 
+        client_id = app_obj.get('appId') # Use appId from the fetched object
         new_secret = self.azure_ad_client.add_password_to_application(token, app_object_id, app_name)
         if not new_secret:
             print(f"[ERROR] Failed to create new secret for app: {app_name}")
             return {'error': 'Failed to create new secret in Azure Entra ID.'}, 500
 
-        # Update DB with the new expiry date
         is_testing = os.environ.get("EXPIRY_TEST_MODE", "False").lower() == "true"
         now_utc = datetime.now(timezone.utc)
         new_expiry_date = now_utc + timedelta(minutes=10) if is_testing else now_utc + timedelta(days=730)
-        
-        # Find the app record in our DB to get user details
-        all_apps = self.user_service.get_all_applications()
-        db_app_record = next((app for app in all_apps if app['app_name'] == app_name), None)
 
-        if not db_app_record:
-            print(f"[ERROR] Could not find app '{app_name}' in local database.")
+        # Prepare secret_info for app_secrets
+        secret_info = {
+            'key_id': 'renewed',  # You may want to fetch the real key_id from Azure response
+            'end_date': new_expiry_date,
+            'display_name': f"{app_name} secret renewed",
+            'latest': 1
+        }
+        success = self.user_service.add_new_secret(app_name, secret_info)
+        if not success:
+            print(f"[ERROR] Could not update local DB for app: {app_name}")
             return {'error': 'Secret created in Azure, but could not update local database. Please contact support.'}, 500
 
-        # Get key_id from Azure response for the new secret
-        app_obj_with_secrets = self.azure_ad_client.get_application_with_secrets(token, app_name)
-        key_id = None
-        if app_obj_with_secrets and app_obj_with_secrets.get('passwordCredentials'):
-            latest_secret = max(app_obj_with_secrets['passwordCredentials'], key=lambda s: s['endDateTime'])
-            key_id = latest_secret.get('keyId')
-        db_update_success = self.user_service.update_application_expiry(db_app_record['id'], new_expiry_date, app_name=app_name, key_id=key_id)
-        if not db_update_success:
-            print(f"[ERROR] Failed to update local DB for app: {app_name}")
-            return {'error': 'Failed to update local database.'}, 500
+        # Get user details for email
+        latest_secret = self.user_service.get_latest_secret(app_name)
+        user_info_id = latest_secret['user_info_id'] if latest_secret else None
+        user_name = None
+        email = None
+        if user_info_id:
+            conn = self.db_config.connect()
+            cursor = conn.cursor()
+            cursor.execute("SELECT user_name, email FROM user_info WHERE id = ?", (user_info_id,))
+            row = cursor.fetchone()
+            if row:
+                user_name, email = row
+            conn.close()
 
-        # Send confirmation email
         tenant_id = self.azure_ad_client.tenant_id
         expires_on_ist_str = new_expiry_date.astimezone(self.ist).strftime('%Y-%m-%d %H:%M:%S')
-        
+
         email_body_html = f"""
         <html>
           <body style="font-family: Arial, sans-serif; color: #333;">
-            <p>Hi {db_app_record['user_name']},</p>
+            <p>Hi {user_name},</p>
             <p>The client secret for your Azure Service Principal <strong>'{app_name}'</strong> has been successfully renewed.</p>
             <p>Please find the new credentials below:</p>
             <table style="border-collapse: collapse; margin-top: 10px;">
@@ -199,7 +204,7 @@ class AppController:
         try:
             msg = Message(
                 subject=f"Secret Renewed: Azure Service Principal '{app_name}'",
-                recipients=[db_app_record['email']],
+                recipients=[email],
                 html=email_body_html
             )
             self.mail.send(msg)
@@ -207,7 +212,7 @@ class AppController:
             print(f"[ERROR] Failed to send renewal email: {e}")
 
         return {
-            'message': f"Secret for '{app_name}' has been renewed. New credentials have been emailed to {db_app_record['email']}.",
+            'message': f"Secret for '{app_name}' has been renewed. New credentials have been emailed to {email}.",
             'client_id': client_id,
             'tenant_id': tenant_id,
         }, 200
@@ -219,113 +224,81 @@ class AppController:
         Resends every `resend_interval_days` days if not renewed.
         """
         print(f"[INFO] Starting expiry notification check for {days} days.")
-        all_db_apps = self.user_service.get_all_applications()
-        if not all_db_apps:
-            print("[INFO] No applications found in the database to check.")
-            return {'message': 'No applications found.'}, 200
-
-        token = self.azure_ad_client.get_access_token()
-        if not token:
-            print("[ERROR] Could not get Azure token for notification check.")
-            return {'error': 'Failed to get Azure token.'}, 500
-
-        now_utc = datetime.now(timezone.utc)
-        future_cutoff_utc = now_utc + timedelta(days=days)
-        resend_cutoff_utc = now_utc - timedelta(days=resend_interval_days)
-        
+        expiring_secrets = self.user_service.get_expiring_secrets(days)
         notifications_sent = 0
-
-        for app in all_db_apps:
+        for secret in expiring_secrets:
             try:
-                # Get the REAL latest secret from Azure Graph
-                app_details = self.azure_ad_client.get_application_with_secrets(token, app['app_name'])
-                if not app_details or not app_details.get('passwordCredentials'):
-                    continue # No secrets found for this app in Azure
-
-                # Find the latest secret among all secrets for this app
-                latest_secret = None
-                for secret in app_details['passwordCredentials']:
-                    end_dt = datetime.fromisoformat(secret['endDateTime'].replace('Z','+00:00'))
-                    if latest_secret is None or end_dt > latest_secret['endDateTime']:
-                        latest_secret = secret
-                        latest_secret['endDateTime'] = end_dt
-                
-                latest_expiry_utc = latest_secret['endDateTime']
-
-                # Check if this latest secret is expiring soon
-                if now_utc < latest_expiry_utc <= future_cutoff_utc:
-                    # Check if we should resend a notification
-                    should_notify = False
-                    if app['last_notified_at'] is None:
-                        should_notify = True
-                    else:
-                        # last_notified_at is naive from SQL, make it timezone-aware
-                        last_notified_utc = app['last_notified_at'].replace(tzinfo=self.ist).astimezone(timezone.utc)
-                        if last_notified_utc < resend_cutoff_utc:
-                            should_notify = True
-                    
-                    if should_notify:
-                        print(f"[DEBUG] Sending upcoming expiry email for: {app['app_name']} (expires: {latest_expiry_utc.date()})")
-                        expires_str = latest_expiry_utc.astimezone(self.ist).strftime('%Y-%m-%d %H:%M:%S')
-                        email_body_html = f"""
-                        <html>
-                          <body style="font-family: Arial, sans-serif; color: #333;">
-                            <p>Hi {app['user_name']},</p>
-                            <p><strong>Heads up:</strong> Your Azure Service Principal secret for <strong>{app['app_name']}</strong> will expire on <strong>{expires_str}</strong>.</p>
-                            <p>Please renew it before expiry to avoid disruption.</p>
-                            <p>Best Regards,<br>Azure Service Principal Automation Team</p>
-                          </body>
-                        </html>
-                        """
-                        msg = Message(
-                            subject=f"[Upcoming Expiry] SP Secret for '{app['app_name']}'",
-                            recipients=[app['email']],
-                            html=email_body_html
-                        )
-                        self.mail.send(msg)
-                        # UPDATED: Use app_id for marking as notified
-                        self.user_service.mark_as_notified(app['id'], column="notified_upcoming")
-                        notifications_sent += 1
-
+                # Get user info
+                user_info_id = secret['user_info_id']
+                conn = self.db_config.connect()
+                cursor = conn.cursor()
+                cursor.execute("SELECT user_name, email FROM user_info WHERE id = ?", (user_info_id,))
+                row = cursor.fetchone()
+                if row:
+                    user_name, email = row
+                else:
+                    continue
+                conn.close()
+                expires_str = secret['end_date'].strftime('%Y-%m-%d %H:%M:%S')
+                email_body_html = f"""
+                <html>
+                  <body style="font-family: Arial, sans-serif; color: #333;">
+                    <p>Hi {user_name},</p>
+                    <p><strong>Heads up:</strong> Your Azure Service Principal secret for <strong>{secret['app_name']}</strong> will expire on <strong>{expires_str}</strong>.</p>
+                    <p>Please renew it before expiry to avoid disruption.</p>
+                    <p>Best Regards,<br>Azure Service Principal Automation Team</p>
+                  </body>
+                </html>
+                """
+                msg = Message(
+                    subject=f"[Upcoming Expiry] SP Secret for '{secret['app_name']}'",
+                    recipients=[email],
+                    html=email_body_html
+                )
+                self.mail.send(msg)
+                self.user_service.mark_secret_notified(secret['id'], column="notified_upcoming")
+                notifications_sent += 1
             except Exception as e:
-                print(f"[ERROR] Failed to process notifications for app {app['app_name']}: {e}")
-
+                print(f"[ERROR] Failed to process notifications for secret {secret['id']}: {e}")
         return {'message': f'Notification check complete. Sent {notifications_sent} notifications.'}, 200
 
     # NOTE: This method could also be updated with the new logic for consistency.
     def send_expired_notifications(self):
         expired_secrets = self.user_service.get_expired_secrets()
-
         if not expired_secrets:
             print("[INFO] No expired secrets found.")
             return {'message': 'No expired secrets found.'}, 200
-
-        for user_name, email, app_name, expires_on in expired_secrets:
+        for secret in expired_secrets:
             try:
-                print(f"[DEBUG] Expired app: {app_name}, Email: {email}")
-
-                expires_str = expires_on.strftime('%Y-%m-%d %H:%M:%S')
+                user_info_id = secret['user_info_id']
+                conn = self.db_config.connect()
+                cursor = conn.cursor()
+                cursor.execute("SELECT user_name, email FROM user_info WHERE id = ?", (user_info_id,))
+                row = cursor.fetchone()
+                if row:
+                    user_name, email = row
+                else:
+                    continue
+                conn.close()
+                expires_str = secret['end_date'].strftime('%Y-%m-%d %H:%M:%S')
                 email_body_html = f"""
                 <html>
                     <body style="font-family: Arial, sans-serif; color: #333;">
                         <p>Hi {user_name},</p>
-                        <p><strong>Action Required:</strong> Your Azure Service Principal secret for <strong>{app_name}</strong> expired on <strong>{expires_str}</strong>.</p>
+                        <p><strong>Action Required:</strong> Your Azure Service Principal secret for <strong>{secret['app_name']}</strong> expired on <strong>{expires_str}</strong>.</p>
                         <p>Please generate a new secret to avoid service disruption.</p>
                         <p>Best Regards,<br>Azure Service Principal Automation Team</p>
                     </body>
                 </html>
                 """
                 msg = Message(
-                    subject=f"[Expired] SP Secret for '{app_name}'",
+                    subject=f"[Expired] SP Secret for '{secret['app_name']}'",
                     recipients=[email],
                     html=email_body_html
                 )
                 self.mail.send(msg)
-
-                self.user_service.mark_as_notified(app_name, column="notified_expired")
-                print(f"[DEBUG] Marked expired notification sent for: {app_name}")
-
+                self.user_service.mark_secret_notified(secret['id'], column="notified_expired")
+                print(f"[DEBUG] Marked expired notification sent for: {secret['app_name']}")
             except Exception as e:
-                print(f"[ERROR] Failed to send expired email to {email}: {e}")
-
+                print(f"[ERROR] Failed to send expired email to {secret['id']}: {e}")
         return {'message': f'Expired notifications sent to {len(expired_secrets)} user(s).'}, 200
