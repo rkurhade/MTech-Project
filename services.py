@@ -147,7 +147,7 @@ class UserService:
                 return
             cursor.execute(f"""
                 UPDATE app_secrets
-                SET {column} = 1, last_notified_at = GETDATE()
+                SET {column} = 1, last_updated_at = GETDATE()
                 WHERE id = ?
             """, (secret_id,))
             conn.commit()
@@ -156,37 +156,31 @@ class UserService:
         finally:
             conn.close()
 
-    def get_expiring_secrets(self, days=30, resend_interval_days=2):
-    """
-    Returns secrets expiring in the next 'days' days.
-    Will resend after 'resend_interval_days' days if not renewed.
-    """
-    conn = self.db_config.connect()
-    if not conn:
-        return []
-
-    try:
-        cursor = conn.cursor()
-        now = datetime.now()
-        future = now + timedelta(days=days)
-        cursor.execute(f'''
-            SELECT id, app_name, key_id, end_date, user_info_id,
-                   notified_upcoming, notified_expired, notified_renewal, last_notified_at
-            FROM app_secrets
-            WHERE end_date BETWEEN ? AND ?
-            AND (
-                notified_upcoming = 0
-                OR (notified_upcoming = 1 AND last_notified_at <= DATEADD(day, -{resend_interval_days}, GETDATE()))
-            )
-        ''', (now, future))
-        columns = [column[0] for column in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch expiring secrets: {e}")
-        return []
-    finally:
-        conn.close()
-
+    def get_expiring_secrets(self, days=30):
+        """
+        Returns secrets expiring in next 'days' days.
+        """
+        conn = self.db_config.connect()
+        if not conn:
+            return []
+        try:
+            cursor = conn.cursor()
+            now = datetime.now()
+            future = now + timedelta(days=days)
+            cursor.execute('''
+                SELECT id, app_name, key_id, end_date, created_date, display_name,
+                       notified_upcoming, notified_expired, notified_renewal, last_updated_at, user_info_id
+                FROM app_secrets
+                WHERE end_date BETWEEN ? AND ?
+                AND (notified_upcoming = 0 OR last_updated_at <= DATEADD(day, -3, GETDATE()) OR last_updated_at IS NULL)
+            ''', (now, future))
+            columns = [column[0] for column in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch expiring secrets: {e}")
+            return []
+        finally:
+            conn.close()
 
     def get_expired_secrets(self):
         """
@@ -199,9 +193,11 @@ class UserService:
             cursor = conn.cursor()
             now = datetime.now()
             cursor.execute('''
-                SELECT * FROM app_secrets
+                SELECT id, app_name, key_id, end_date, created_date, display_name,
+                       notified_upcoming, notified_expired, notified_renewal, last_updated_at, user_info_id
+                FROM app_secrets
                 WHERE end_date < ?
-                AND (notified_expired = 0 OR last_notified_at <= DATEADD(day, -3, GETDATE()) OR last_notified_at IS NULL)
+                AND (notified_expired = 0 OR last_updated_at <= DATEADD(day, -3, GETDATE()) OR last_updated_at IS NULL)
             ''', (now,))
             columns = [column[0] for column in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -221,7 +217,7 @@ class UserService:
         try:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, user_name, email, app_name, last_notified_at
+                SELECT id, user_name, email, app_name, created_date
                 FROM user_info
             """)
             # Convert rows to a list of dictionaries for easier access
@@ -232,6 +228,4 @@ class UserService:
             return []
         finally:
             conn.close()
-
-
 
