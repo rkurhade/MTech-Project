@@ -31,6 +31,7 @@ mail = Mail(app)
 # Load other services and controller
 db_config = DatabaseConfig(ConfigLoader.load_db_config())
 azure_ad_client = AzureADClient(ConfigLoader.load_azure_ad_config())
+# UserService now supports new DB structure
 user_service = UserService(db_config)
 app_controller = AppController(db_config, azure_ad_client, user_service, mail)
 
