@@ -37,7 +37,7 @@ class UserService:
     def store_user_and_secret(self, user_name, email, app_name, secret_info):
         """
         Inserts user into user_info and secret into app_secrets.
-        secret_info: dict with keys key_id, end_date, display_name, latest, etc.
+        secret_info: dict with keys key_id, end_date, display_name.
         Returns True if both inserts succeed.
         """
         conn = self.db_config.connect()
@@ -48,8 +48,8 @@ class UserService:
             cursor = conn.cursor()
             # Insert user_info
             cursor.execute("""
-                INSERT INTO user_info (user_name, email, app_name, created_date, last_notified_at)
-                VALUES (?, ?, ?, GETDATE(), NULL)
+                INSERT INTO user_info (user_name, email, app_name, created_date)
+                VALUES (?, ?, ?, GETDATE())
             """, (user_name, email, app_name))
             conn.commit()
             # Get user_info_id
@@ -60,14 +60,13 @@ class UserService:
                 INSERT INTO app_secrets (
                     app_name, key_id, end_date, created_date, display_name,
                     notified_upcoming, notified_expired, notified_renewal,
-                    last_notified_at, latest, last_updated_at, user_info_id
-                ) VALUES (?, ?, ?, GETDATE(), ?, 0, 0, 0, NULL, ?, GETDATE(), ?)
+                    last_updated_at, user_info_id
+                ) VALUES (?, ?, ?, GETDATE(), ?, 0, 0, 0, GETDATE(), ?)
             """, (
                 app_name,
                 secret_info['key_id'],
                 secret_info['end_date'],
                 secret_info['display_name'],
-                secret_info.get('latest', 1),
                 user_info_id
             ))
             conn.commit()
@@ -80,8 +79,8 @@ class UserService:
 
     def add_new_secret(self, app_name, secret_info):
         """
-        Adds a new secret for an app, marks previous as not latest.
-        secret_info: dict with keys key_id, end_date, display_name, latest, etc.
+        Adds a new secret for an app.
+        secret_info: dict with keys key_id, end_date, display_name.
         """
         conn = self.db_config.connect()
         if not conn:
@@ -89,8 +88,6 @@ class UserService:
             return False
         try:
             cursor = conn.cursor()
-            # Mark previous secrets as not latest
-            cursor.execute("UPDATE app_secrets SET latest = 0 WHERE app_name = ? AND latest = 1", (app_name,))
             # Get user_info_id
             cursor.execute("SELECT TOP 1 id FROM user_info WHERE app_name = ? ORDER BY created_date DESC", (app_name,))
             user_info_id = cursor.fetchone()[0]
@@ -99,8 +96,8 @@ class UserService:
                 INSERT INTO app_secrets (
                     app_name, key_id, end_date, created_date, display_name,
                     notified_upcoming, notified_expired, notified_renewal,
-                    last_notified_at, latest, last_updated_at, user_info_id
-                ) VALUES (?, ?, ?, GETDATE(), ?, 0, 0, 0, NULL, 1, GETDATE(), ?)
+                    last_updated_at, user_info_id
+                ) VALUES (?, ?, ?, GETDATE(), ?, 0, 0, 0, GETDATE(), ?)
             """, (
                 app_name,
                 secret_info['key_id'],
@@ -116,26 +113,7 @@ class UserService:
         finally:
             conn.close()
 
-    def get_latest_secret(self, app_name):
-        """
-        Returns the latest secret row for an app.
-        """
-        conn = self.db_config.connect()
-        if not conn:
-            return None
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM app_secrets WHERE app_name = ? AND latest = 1", (app_name,))
-            row = cursor.fetchone()
-            if row:
-                columns = [column[0] for column in cursor.description]
-                return dict(zip(columns, row))
-            return None
-        except Exception as e:
-            print(f"[ERROR] Failed to fetch latest secret: {e}")
-            return None
-        finally:
-            conn.close()
+    # REMOVED: get_latest_secret (no latest column in schema)
 
     def update_secret_expiry(self, secret_id, new_end_date):
         """
@@ -193,7 +171,6 @@ class UserService:
                 SELECT * FROM app_secrets
                 WHERE end_date BETWEEN ? AND ?
                 AND (notified_upcoming = 0 OR last_notified_at <= DATEADD(day, -3, GETDATE()) OR last_notified_at IS NULL)
-                AND latest = 1
             ''', (now, future))
             columns = [column[0] for column in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -217,7 +194,6 @@ class UserService:
                 SELECT * FROM app_secrets
                 WHERE end_date < ?
                 AND (notified_expired = 0 OR last_notified_at <= DATEADD(day, -3, GETDATE()) OR last_notified_at IS NULL)
-                AND latest = 1
             ''', (now,))
             columns = [column[0] for column in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
