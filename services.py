@@ -37,7 +37,7 @@ class UserService:
     def store_user_and_secret(self, user_name, email, app_name, secret_info):
         """
         Inserts user into user_info and secret into app_secrets.
-        secret_info: dict with keys key_id, end_date, display_name, latest, etc.
+        secret_info: dict with keys key_id, end_date, display_name.
         Returns True if both inserts succeed.
         """
         conn = self.db_config.connect()
@@ -48,8 +48,8 @@ class UserService:
             cursor = conn.cursor()
             # Insert user_info
             cursor.execute("""
-                INSERT INTO user_info (user_name, email, app_name, created_date, last_notified_at)
-                VALUES (?, ?, ?, GETDATE(), NULL)
+                INSERT INTO user_info (user_name, email, app_name, created_date)
+                VALUES (?, ?, ?, GETDATE())
             """, (user_name, email, app_name))
             conn.commit()
             # Get user_info_id
@@ -60,14 +60,13 @@ class UserService:
                 INSERT INTO app_secrets (
                     app_name, key_id, end_date, created_date, display_name,
                     notified_upcoming, notified_expired, notified_renewal,
-                    last_notified_at, latest, last_updated_at, user_info_id
-                ) VALUES (?, ?, ?, GETDATE(), ?, 0, 0, 0, NULL, ?, GETDATE(), ?)
+                    last_updated_at, user_info_id
+                ) VALUES (?, ?, ?, GETDATE(), ?, 0, 0, 0, GETDATE(), ?)
             """, (
                 app_name,
                 secret_info['key_id'],
                 secret_info['end_date'],
                 secret_info['display_name'],
-                secret_info.get('latest', 1),
                 user_info_id
             ))
             conn.commit()
@@ -80,8 +79,8 @@ class UserService:
 
     def add_new_secret(self, app_name, secret_info):
         """
-        Adds a new secret for an app, marks previous as not latest.
-        secret_info: dict with keys key_id, end_date, display_name, latest, etc.
+        Adds a new secret for an app.
+        secret_info: dict with keys key_id, end_date, display_name.
         """
         conn = self.db_config.connect()
         if not conn:
@@ -89,8 +88,6 @@ class UserService:
             return False
         try:
             cursor = conn.cursor()
-            # Mark previous secrets as not latest
-            cursor.execute("UPDATE app_secrets SET latest = 0 WHERE app_name = ? AND latest = 1", (app_name,))
             # Get user_info_id
             cursor.execute("SELECT TOP 1 id FROM user_info WHERE app_name = ? ORDER BY created_date DESC", (app_name,))
             user_info_id = cursor.fetchone()[0]
@@ -99,8 +96,8 @@ class UserService:
                 INSERT INTO app_secrets (
                     app_name, key_id, end_date, created_date, display_name,
                     notified_upcoming, notified_expired, notified_renewal,
-                    last_notified_at, latest, last_updated_at, user_info_id
-                ) VALUES (?, ?, ?, GETDATE(), ?, 0, 0, 0, NULL, 1, GETDATE(), ?)
+                    last_updated_at, user_info_id
+                ) VALUES (?, ?, ?, GETDATE(), ?, 0, 0, 0, GETDATE(), ?)
             """, (
                 app_name,
                 secret_info['key_id'],
@@ -116,26 +113,7 @@ class UserService:
         finally:
             conn.close()
 
-    def get_latest_secret(self, app_name):
-        """
-        Returns the latest secret row for an app.
-        """
-        conn = self.db_config.connect()
-        if not conn:
-            return None
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM app_secrets WHERE app_name = ? AND latest = 1", (app_name,))
-            row = cursor.fetchone()
-            if row:
-                columns = [column[0] for column in cursor.description]
-                return dict(zip(columns, row))
-            return None
-        except Exception as e:
-            print(f"[ERROR] Failed to fetch latest secret: {e}")
-            return None
-        finally:
-            conn.close()
+    # REMOVED: get_latest_secret (no latest column in schema)
 
     def update_secret_expiry(self, secret_id, new_end_date):
         """
@@ -190,10 +168,11 @@ class UserService:
             now = datetime.now()
             future = now + timedelta(days=days)
             cursor.execute('''
-                SELECT * FROM app_secrets
+                SELECT id, app_name, key_id, end_date, created_date, display_name,
+                       notified_upcoming, notified_expired, notified_renewal, last_updated_at, user_info_id
+                FROM app_secrets
                 WHERE end_date BETWEEN ? AND ?
-                AND (notified_upcoming = 0 OR last_notified_at <= DATEADD(day, -3, GETDATE()) OR last_notified_at IS NULL)
-                AND latest = 1
+                AND (notified_upcoming = 0 OR last_updated_at <= DATEADD(day, -3, GETDATE()) OR last_updated_at IS NULL)
             ''', (now, future))
             columns = [column[0] for column in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -214,10 +193,11 @@ class UserService:
             cursor = conn.cursor()
             now = datetime.now()
             cursor.execute('''
-                SELECT * FROM app_secrets
+                SELECT id, app_name, key_id, end_date, created_date, display_name,
+                       notified_upcoming, notified_expired, notified_renewal, last_updated_at, user_info_id
+                FROM app_secrets
                 WHERE end_date < ?
-                AND (notified_expired = 0 OR last_notified_at <= DATEADD(day, -3, GETDATE()) OR last_notified_at IS NULL)
-                AND latest = 1
+                AND (notified_expired = 0 OR last_updated_at <= DATEADD(day, -3, GETDATE()) OR last_updated_at IS NULL)
             ''', (now,))
             columns = [column[0] for column in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -237,7 +217,7 @@ class UserService:
         try:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, user_name, email, app_name, last_notified_at
+                SELECT id, user_name, email, app_name, created_date
                 FROM user_info
             """)
             # Convert rows to a list of dictionaries for easier access
@@ -246,107 +226,5 @@ class UserService:
         except Exception as e:
             print(f"[ERROR] Failed to fetch all applications: {e}")
             return []
-        finally:
-            conn.close()
-
-    # NEW: Updates the expiry date and resets notification flags for an app
-    def update_application_expiry(self, app_id, new_expiry_date_utc):
-        """Updates the expiry date and resets notification flags for an app."""
-        conn = self.db_config.connect()
-        if not conn:
-            return False
-        try:
-            ist_tz = pytz.timezone("Asia/Kolkata")
-            new_expiry_ist = new_expiry_date_utc.astimezone(ist_tz).replace(tzinfo=None)
-
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE user_info
-                SET expires_on = ?, notified_upcoming = 0, notified_expired = 0, last_notified_at = NULL
-                WHERE id = ?
-            """, (new_expiry_ist, app_id))
-            conn.commit()
-            return True
-        except Exception as e:
-            print(f"[ERROR] Failed to update expiry for app_id {app_id}: {e}")
-            return False
-        finally:
-            conn.close()
-
-    # UPDATED: Now uses app_id instead of app_name for reliability
-    def mark_as_notified(self, app_id, column="notified_upcoming"):
-        conn = self.db_config.connect()
-        if not conn:
-            return
-
-        try:
-            cursor = conn.cursor()
-            if column not in ["notified_upcoming", "notified_expired"]:
-                print(f"[ERROR] Invalid column name: {column}")
-                return
-
-            cursor.execute(f"""
-                UPDATE user_info
-                SET {column} = 1, last_notified_at = GETDATE()
-                WHERE id = ?
-            """, (app_id,))
-            conn.commit()
-        
-        except Exception as e:
-            print(f"[ERROR] Failed to update {column} flag for app_id {app_id}: {e}")
-        
-        finally:
-            conn.close()
-
-    # NOTE: The get_expiring_soon and get_expired_secrets methods are no longer used
-    # by the main notification logic but are kept here in case they are used elsewhere.
-    def get_expiring_soon(self, days=30):
-        conn = self.db_config.connect()
-        if not conn:
-            return []
-
-        try:
-            cursor = conn.cursor()
-            now = datetime.now()
-            future = now + timedelta(days=days)
-
-            cursor.execute('''
-                SELECT user_name, email, app_name, expires_on, last_notified_at
-                FROM user_info
-                WHERE expires_on BETWEEN ? AND ?
-                AND (notified_upcoming = 0 OR last_notified_at <= DATEADD(day, -3, GETDATE()) OR last_notified_at IS NULL)
-            ''', (now, future))
-
-            return cursor.fetchall()
-
-        except Exception as e:
-            print(f"[ERROR] Failed to fetch upcoming expiring secrets: {e}")
-            return []
-
-        finally:
-            conn.close()
-
-    def get_expired_secrets(self):
-        conn = self.db_config.connect()
-        if not conn:
-            return []
-
-        try:
-            cursor = conn.cursor()
-            now = datetime.now()
-
-            cursor.execute('''
-                SELECT user_name, email, app_name, expires_on, last_notified_at
-                FROM user_info
-                WHERE expires_on < ?
-                AND (notified_expired = 0 OR last_notified_at <= DATEADD(day, -3, GETDATE()) OR last_notified_at IS NULL)
-            ''', (now,))
-
-            return cursor.fetchall()
-
-        except Exception as e:
-            print(f"[ERROR] Failed to fetch expired secrets: {e}")
-            return []
-
         finally:
             conn.close()
