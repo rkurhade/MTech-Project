@@ -59,11 +59,19 @@ class AppController:
         except Exception as e:
             print(f"[ERROR] Could not add owner to app: {e}")
 
-        # Set expiry to 24 months from now
+        # Determine expiry based on testing mode
+        is_testing = os.environ.get("EXPIRY_TEST_MODE", "False").lower() == "true"
         now_utc = datetime.now(timezone.utc)
-        expires_on = now_utc + timedelta(days=730)
 
-        # Prepare secret_info for app_secrets
+        if is_testing:
+            print("[INFO] EXPIRY_TEST_MODE is ON: Using 10-minute expiry.")
+            expires_on = now_utc + timedelta(minutes=10)
+        else:
+            print("[INFO] EXPIRY_TEST_MODE is OFF: Using 24-month expiry.")
+            expires_on = now_utc + timedelta(days=730)
+
+
+        # Prepare secret_info for app_secrets (no latest column)
         secret_info = {
             'key_id': 'initial',  # You may want to fetch the real key_id from Azure response
             'end_date': expires_on,
@@ -81,20 +89,20 @@ class AppController:
 
         email_body_html = f"""
         <html>
-            <body style="font-family: Arial, sans-serif; color: #333;">
-                <p>Hi {user_name},</p>
-                <p>Your Azure Service Principal has been created successfully. Please find the credentials below:</p>
-                <table style="border-collapse: collapse; margin-top: 10px;">
-                    <tr><td style="padding: 8px; font-weight: bold;">Service Principal Name:</td><td style="padding: 8px;">{app_name}</td></tr>
-                    <tr><td style="padding: 8px; font-weight: bold;">Client ID:</td><td style="padding: 8px;">{client_id}</td></tr>
-                    <tr><td style="padding: 8px; font-weight: bold;">Client Secret:</td><td style="padding: 8px;">{client_secret}</td></tr>
-                    <tr><td style="padding: 8px; font-weight: bold;">Tenant ID:</td><td style="padding: 8px;">{tenant_id}</td></tr>
-                    <tr><td style="padding: 8px; font-weight: bold;">Secret Expiry (IST):</td><td style="padding: 8px;">{expires_on_ist_str}</td></tr>
-                </table>
-                <p><strong>NOTE: Secret is valid for 24 months from date of creation</strong>.</p>
-                <p><strong>Please store these credentials securely</strong>. Do not share them with unauthorized users.</p>
-                <p>Best Regards,<br>Azure Service Principal Automation Team</p>
-            </body>
+          <body style="font-family: Arial, sans-serif; color: #333;">
+            <p>Hi {user_name},</p>
+            <p>Your Azure Service Principal has been created successfully. Please find the credentials below:</p>
+            <table style="border-collapse: collapse; margin-top: 10px;">
+              <tr><td style="padding: 8px; font-weight: bold;">Service Principal Name:</td><td style="padding: 8px;">{app_name}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Client ID:</td><td style="padding: 8px;">{client_id}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Client Secret:</td><td style="padding: 8px;">{client_secret}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Tenant ID:</td><td style="padding: 8px;">{tenant_id}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Secret Expiry (IST):</td><td style="padding: 8px;">{expires_on_ist_str}</td></tr>
+            </table>
+            <p><strong>NOTE: Secret is valid for {'10 minute' if is_testing else '24 months'} from date of creation</strong>.</p>
+            <p><strong>Please store these credentials securely</strong>. Do not share them with unauthorized users.</p>
+            <p>Best Regards,<br>Azure Service Principal Automation Team</p>
+          </body>
         </html>
         """
 
@@ -140,68 +148,67 @@ class AppController:
             print(f"[ERROR] Failed to create new secret for app: {app_name}")
             return {'error': 'Failed to create new secret in Azure Entra ID.'}, 500
 
-            now_utc = datetime.now(timezone.utc)
-            new_expiry_date = now_utc + timedelta(days=730)
+        is_testing = os.environ.get("EXPIRY_TEST_MODE", "False").lower() == "true"
+        now_utc = datetime.now(timezone.utc)
+        new_expiry_date = now_utc + timedelta(minutes=10) if is_testing else now_utc + timedelta(days=730)
 
-            # Prepare secret_info for app_secrets
-            secret_info = {
-                'key_id': 'renewed',  # You may want to fetch the real key_id from Azure response
-                'end_date': new_expiry_date,
-                'display_name': f"{app_name} secret renewed"
-            }
-            success = self.user_service.add_new_secret(app_name, secret_info)
-            if not success:
-                print(f"[ERROR] Could not update local DB for app: {app_name}")
-                return {'error': 'Secret created in Azure, but could not update local database. Please contact support.'}, 500
+        # Prepare secret_info for app_secrets (no latest column)
+        secret_info = {
+            'key_id': 'renewed',  # You may want to fetch the real key_id from Azure response
+            'end_date': new_expiry_date,
+            'display_name': f"{app_name} secret renewed"
+        }
+        success = self.user_service.add_new_secret(app_name, secret_info)
+        if not success:
+            print(f"[ERROR] Could not update local DB for app: {app_name}")
+            return {'error': 'Secret created in Azure, but could not update local database. Please contact support.'}, 500
 
-            # Get user details for email
-            latest_secret = self.user_service.get_latest_secret(app_name)
-            user_info_id = latest_secret['user_info_id'] if latest_secret else None
-            user_name = None
-            email = None
-            if user_info_id:
-                conn = self.db_config.connect()
-                cursor = conn.cursor()
-                cursor.execute("SELECT user_name, email FROM user_info WHERE id = ?", (user_info_id,))
-                row = cursor.fetchone()
-                if row:
-                    user_name, email = row
-                conn.close()
-            tenant_id = self.azure_ad_client.tenant_id
-            expires_on_ist_str = new_expiry_date.astimezone(self.ist).strftime('%Y-%m-%d %H:%M:%S')
-            email_body_html = f"""
-            <html>
-                <body style="font-family: Arial, sans-serif; color: #333;">
-                    <p>Hi {user_name},</p>
-                    <p>The client secret for your Azure Service Principal <strong>'{app_name}'</strong> has been successfully renewed.</p>
-                    <p>Please find the new credentials below:</p>
-                    <table style="border-collapse: collapse; margin-top: 10px;">
-                        <tr><td style="padding: 8px; font-weight: bold;">Service Principal Name:</td><td style="padding: 8px;">{app_name}</td></tr>
-                        <tr><td style="padding: 8px; font-weight: bold;">Client ID:</td><td style="padding: 8px;">{client_id}</td></tr>
-                        <tr><td style="padding: 8px; font-weight: bold;">New Client Secret:</td><td style="padding: 8px;">{new_secret}</td></tr>
-                        <tr><td style="padding: 8px; font-weight: bold;">Tenant ID:</td><td style="padding: 8px;">{tenant_id}</td></tr>
-                        <tr><td style="padding: 8px; font-weight: bold;">New Secret Expiry (IST):</td><td style="padding: 8px;">{expires_on_ist_str}</td></tr>
-                    </table>
-                    <p><strong>NOTE: This new secret is valid for 24 months from date of creation.</strong></p>
-                    <p><strong>Please discard the old secret and store these new credentials securely</strong>.</p>
-                    <p>Best Regards,<br>Azure Service Principal Automation Team</p>
-                </body>
-            </html>
-            """
-            try:
-                msg = Message(
-                    subject=f"Secret Renewed: Azure Service Principal '{app_name}'",
-                    recipients=[email],
-                    html=email_body_html
-                )
-                self.mail.send(msg)
-            except Exception as e:
-                print(f"[ERROR] Failed to send renewal email: {e}")
-            return {
-                'message': f"Secret for '{app_name}' has been renewed. New credentials have been emailed to {email}.",
-                'client_id': client_id,
-                'tenant_id': tenant_id,
-            }, 200
+        # Get user details for email
+        conn = self.db_config.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_name, email FROM user_info WHERE app_name = ? ORDER BY created_date DESC", (app_name,))
+        row = cursor.fetchone()
+        user_name = row[0] if row else None
+        email = row[1] if row else None
+        conn.close()
+
+        tenant_id = self.azure_ad_client.tenant_id
+        expires_on_ist_str = new_expiry_date.astimezone(self.ist).strftime('%Y-%m-%d %H:%M:%S')
+
+        email_body_html = f"""
+        <html>
+          <body style="font-family: Arial, sans-serif; color: #333;">
+            <p>Hi {user_name},</p>
+            <p>The client secret for your Azure Service Principal <strong>'{app_name}'</strong> has been successfully renewed.</p>
+            <p>Please find the new credentials below:</p>
+            <table style="border-collapse: collapse; margin-top: 10px;">
+              <tr><td style="padding: 8px; font-weight: bold;">Service Principal Name:</td><td style="padding: 8px;">{app_name}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Client ID:</td><td style="padding: 8px;">{client_id}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">New Client Secret:</td><td style="padding: 8px;">{new_secret}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Tenant ID:</td><td style="padding: 8px;">{tenant_id}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">New Secret Expiry (IST):</td><td style="padding: 8px;">{expires_on_ist_str}</td></tr>
+            </table>
+            <p><strong>NOTE: This new secret is valid for {'10 minute' if is_testing else '24 months'} from date of creation.</strong></p>
+            <p><strong>Please discard the old secret and store these new credentials securely</strong>.</p>
+            <p>Best Regards,<br>Azure Service Principal Automation Team</p>
+          </body>
+        </html>
+        """
+        try:
+            msg = Message(
+                subject=f"Secret Renewed: Azure Service Principal '{app_name}'",
+                recipients=[email],
+                html=email_body_html
+            )
+            self.mail.send(msg)
+        except Exception as e:
+            print(f"[ERROR] Failed to send renewal email: {e}")
+
+        return {
+            'message': f"Secret for '{app_name}' has been renewed. New credentials have been emailed to {email}.",
+            'client_id': client_id,
+            'tenant_id': tenant_id,
+        }, 200
 
     # UPDATED: Completely rewritten to check the real latest secret in Azure
     def send_upcoming_expiry_notifications(self, days=30, resend_interval_days=2):
