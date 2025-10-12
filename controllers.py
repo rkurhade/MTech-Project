@@ -295,3 +295,5 @@ class AppController:
             except Exception as e:
                 print(f"[ERROR] Failed to send expired email to {secret['id']}: {e}")
         return {'message': f'Expired notifications sent to {len(expired_secrets)} user(s).'}, 200
+
+
