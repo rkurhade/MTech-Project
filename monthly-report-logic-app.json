@@ -1,0 +1,166 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "Monthly_Schedule": {
+                "recurrence": {
+                    "frequency": "Month",
+                    "interval": 1,
+                    "startTime": "2025-11-01T09:00:00Z",
+                    "timeZone": "India Standard Time"
+                },
+                "type": "Recurrence"
+            }
+        },
+        "actions": {
+            "Get_Previous_Month_Data": {
+                "runAfter": {},
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['sql']['connectionId']"
+                        }
+                    },
+                    "method": "post",
+                    "body": {
+                        "query": "SELECT COUNT(*) as total_created, COUNT(DISTINCT user_name) as unique_users, COUNT(DISTINCT email) as unique_emails, YEAR(DATEADD(month, -1, GETDATE())) as report_year, MONTH(DATEADD(month, -1, GETDATE())) as report_month FROM user_info WHERE YEAR(created_date) = YEAR(DATEADD(month, -1, GETDATE())) AND MONTH(created_date) = MONTH(DATEADD(month, -1, GETDATE()))"
+                    },
+                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent('default'))},@{encodeURIComponent(encodeURIComponent('default'))}/query/sql"
+                }
+            },
+            "Get_Previous_Month_Details": {
+                "runAfter": {
+                    "Get_Previous_Month_Data": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['sql']['connectionId']"
+                        }
+                    },
+                    "method": "post",
+                    "body": {
+                        "query": "SELECT user_name, email, app_name, created_date FROM user_info WHERE YEAR(created_date) = YEAR(DATEADD(month, -1, GETDATE())) AND MONTH(created_date) = MONTH(DATEADD(month, -1, GETDATE())) ORDER BY created_date DESC"
+                    },
+                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent('default'))},@{encodeURIComponent(encodeURIComponent('default'))}/query/sql"
+                }
+            },
+            "Generate_Report_Variables": {
+                "runAfter": {
+                    "Get_Previous_Month_Details": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "ReportMonth",
+                            "type": "string",
+                            "value": "@{switch(body('Get_Previous_Month_Data')?['resultsets']?['Table1'][0]['report_month'], 1, 'January', 2, 'February', 3, 'March', 4, 'April', 5, 'May', 6, 'June', 7, 'July', 8, 'August', 9, 'September', 10, 'October', 11, 'November', 12, 'December')}"
+                        }
+                    ]
+                }
+            },
+            "Generate_Details_Table": {
+                "runAfter": {
+                    "Generate_Report_Variables": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "DetailsTable",
+                            "type": "string",
+                            "value": "@if(greater(length(coalesce(body('Get_Previous_Month_Details')?['resultsets']?['Table1'], createArray())), 0), concat('<h3>📋 Detailed List:</h3><table style=\"border-collapse: collapse; width: 100%; margin-top: 10px;\"><thead><tr style=\"background-color: #f0f0f0;\"><th style=\"border: 1px solid #ddd; padding: 8px; text-align: left;\">Date</th><th style=\"border: 1px solid #ddd; padding: 8px; text-align: left;\">User Name</th><th style=\"border: 1px solid #ddd; padding: 8px; text-align: left;\">Email</th><th style=\"border: 1px solid #ddd; padding: 8px; text-align: left;\">Service Principal Name</th></tr></thead><tbody>', join(createArray(select(body('Get_Previous_Month_Details')?['resultsets']?['Table1'], concat('<tr><td style=\"border: 1px solid #ddd; padding: 8px;\">', formatDateTime(item()['created_date'], 'yyyy-MM-dd'), '</td><td style=\"border: 1px solid #ddd; padding: 8px;\">', item()['user_name'], '</td><td style=\"border: 1px solid #ddd; padding: 8px;\">', item()['email'], '</td><td style=\"border: 1px solid #ddd; padding: 8px;\">', item()['app_name'], '</td></tr>'))), ''), '</tbody></table>'), '<p>🔹 No Service Principals were created during this period.</p>')"
+                        }
+                    ]
+                }
+            },
+            "Send_Monthly_Report_Email": {
+                "runAfter": {
+                    "Generate_Details_Table": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['smtp']['connectionId']"
+                        }
+                    },
+                    "method": "post",
+                    "body": {
+                        "From": "@parameters('sender_email')",
+                        "To": "@parameters('admin_email')",
+                        "Subject": "📊 Monthly SPN Report - @{variables('ReportMonth')} @{body('Get_Previous_Month_Data')?['resultsets']?['Table1'][0]['report_year']} (@{body('Get_Previous_Month_Data')?['resultsets']?['Table1'][0]['total_created']} Created)",
+                        "Body": "<html><body style='font-family: Arial, sans-serif; color: #333; line-height: 1.6;'><div style='max-width: 800px; margin: 0 auto; padding: 20px;'><h2 style='color: #0078d4; border-bottom: 2px solid #0078d4; padding-bottom: 10px;'>📊 Azure Service Principal Monthly Report</h2><h3>📅 Report Period: @{variables('ReportMonth')} @{body('Get_Previous_Month_Data')?['resultsets']?['Table1'][0]['report_year']}</h3><div style='background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;'><h3 style='margin-top: 0; color: #0078d4;'>📈 Summary Statistics</h3><table style='width: 100%; border-collapse: collapse;'><tr><td style='padding: 8px; border-bottom: 1px solid #ddd;'><strong>Total Service Principals Created:</strong></td><td style='padding: 8px; border-bottom: 1px solid #ddd; color: #0078d4; font-weight: bold;'>@{body('Get_Previous_Month_Data')?['resultsets']?['Table1'][0]['total_created']}</td></tr><tr><td style='padding: 8px; border-bottom: 1px solid #ddd;'><strong>Unique Users:</strong></td><td style='padding: 8px; border-bottom: 1px solid #ddd;'>@{body('Get_Previous_Month_Data')?['resultsets']?['Table1'][0]['unique_users']}</td></tr><tr><td style='padding: 8px;'><strong>Unique Email Addresses:</strong></td><td style='padding: 8px;'>@{body('Get_Previous_Month_Data')?['resultsets']?['Table1'][0]['unique_emails']}</td></tr></table></div>@{variables('DetailsTable')}<div style='margin-top: 30px; padding: 15px; background-color: #e8f4fd; border-radius: 5px;'><p style='margin: 0;'><strong>📧 Report generated on:</strong> @{convertTimeZone(utcNow(), 'UTC', 'India Standard Time', 'yyyy-MM-dd HH:mm:ss')} IST</p><p style='margin: 5px 0 0 0;'><small>This is an automated report from Azure Service Principal Management System.</small></p></div></div></body></html>"
+                    },
+                    "path": "/SendEmailV3"
+                }
+            },
+            "Log_Report_Sent": {
+                "runAfter": {
+                    "Send_Monthly_Report_Email": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Compose",
+                "inputs": {
+                    "message": "Monthly report sent successfully",
+                    "report_period": "@{variables('ReportMonth')} @{body('Get_Previous_Month_Data')?['resultsets']?['Table1'][0]['report_year']}",
+                    "total_created": "@{body('Get_Previous_Month_Data')?['resultsets']?['Table1'][0]['total_created']}",
+                    "sent_to": "@parameters('admin_email')",
+                    "timestamp": "@convertTimeZone(utcNow(), 'UTC', 'India Standard Time', 'yyyy-MM-dd HH:mm:ss')"
+                }
+            }
+        },
+        "parameters": {
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            },
+            "sender_email": {
+                "type": "String",
+                "defaultValue": "azurespnautomation@gmail.com"
+            },
+            "admin_email": {
+                "type": "String",
+                "defaultValue": "admin@yourdomain.com"
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "sql": {
+                    "id": "/subscriptions/091be3f8-5fc3-4857-8047-bf400704b984/providers/Microsoft.Web/locations/centralindia/managedApis/sql",
+                    "connectionId": "/subscriptions/091be3f8-5fc3-4857-8047-bf400704b984/resourceGroups/MTech_Project/providers/Microsoft.Web/connections/sql-1",
+                    "connectionName": "sql-1"
+                },
+                "smtp": {
+                    "id": "/subscriptions/091be3f8-5fc3-4857-8047-bf400704b984/providers/Microsoft.Web/locations/centralindia/managedApis/smtp",
+                    "connectionId": "/subscriptions/091be3f8-5fc3-4857-8047-bf400704b984/resourceGroups/MTech_Project/providers/Microsoft.Web/connections/smtp-1",
+                    "connectionName": "smtp-1"
+                }
+            }
+        },
+        "sender_email": {
+            "type": "String",
+            "value": "azurespnautomation@gmail.com"
+        },
+        "admin_email": {
+            "type": "String",
+            "value": "YOUR_ADMIN_EMAIL_HERE"
+        }
+    }
+}

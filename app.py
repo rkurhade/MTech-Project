@@ -39,6 +39,10 @@ app_controller = AppController(db_config, azure_ad_client, user_service, mail)
 def home():
     return render_template('index.html')
 
+@app.route('/dashboard')
+def dashboard():
+    return render_template('dashboard.html')
+
 EMAIL_REGEX = re.compile(r"^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$")
 
 @app.route('/create_app', methods=['POST'])
@@ -83,6 +87,130 @@ def notify_expired():
         # Use a 2-day resend interval by default, matching the upcoming expiry notifications
         response, status = app_controller.send_expired_notifications(resend_interval_days=2)
         return jsonify(response), status
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/monthly_report', methods=['POST', 'GET'])
+def generate_monthly_report():
+    """
+    Generate monthly Service Principal creation report.
+    POST: Send email report
+    GET: Return JSON report data
+    
+    Query parameters:
+    - year: specific year (optional, defaults to previous month)
+    - month: specific month (optional, defaults to previous month)  
+    - admin_email: email to send report to (optional, defaults to azurespnautomation@gmail.com)
+    """
+    try:
+        # Get parameters
+        year = request.args.get('year', type=int)
+        month = request.args.get('month', type=int)
+        admin_email = request.args.get('admin_email', 'azurespnautomation@gmail.com')
+        
+        # Send email for POST, return JSON for GET
+        send_email = (request.method == 'POST')
+        
+        response, status = app_controller.generate_monthly_report(
+            year=year, 
+            month=month, 
+            send_email=send_email, 
+            admin_email=admin_email
+        )
+        return jsonify(response), status
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/current_month_report', methods=['GET'])
+def current_month_report():
+    """
+    Get current month Service Principal creation statistics (JSON only).
+    """
+    try:
+        response, status = app_controller.generate_monthly_report(
+            send_email=False
+        )
+        # Change to current month
+        from datetime import datetime
+        now = datetime.now()
+        response, status = app_controller.generate_monthly_report(
+            year=now.year, 
+            month=now.month, 
+            send_email=False
+        )
+        return jsonify(response), status
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/html_report', methods=['GET'])
+def generate_html_report():
+    """
+    Generate standalone HTML report file.
+    
+    Query parameters:
+    - year: specific year (optional, defaults to previous month)
+    - month: specific month (optional, defaults to previous month)
+    """
+    try:
+        year = request.args.get('year', type=int)
+        month = request.args.get('month', type=int)
+        
+        response, status = app_controller.generate_monthly_report(
+            year=year, 
+            month=month, 
+            send_email=False,
+            output_format="html"
+        )
+        return jsonify(response), status
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/view_report', methods=['GET'])
+def view_html_report():
+    """
+    Generate and directly display HTML report in browser.
+    
+    Query parameters:
+    - year: specific year (optional, defaults to previous month)
+    - month: specific month (optional, defaults to previous month)
+    """
+    try:
+        year = request.args.get('year', type=int)
+        month = request.args.get('month', type=int)
+        
+        response, status = app_controller.generate_monthly_report(
+            year=year, 
+            month=month, 
+            send_email=False,
+            output_format="html"
+        )
+        
+        if status == 200 and 'html_content' in response:
+            return response['html_content']
+        else:
+            return f"<h1>Error generating report</h1><p>{response.get('error', 'Unknown error')}</p>", status
+    except Exception as e:
+        return f"<h1>Error</h1><p>{str(e)}</p>", 500
+
+@app.route('/download_report/<filename>')
+def download_report(filename):
+    """
+    Download generated HTML report file.
+    """
+    try:
+        import os
+        from flask import send_file
+        
+        # Security check - only allow HTML files with expected naming pattern
+        if not filename.endswith('.html') or not filename.startswith('SPN_Monthly_Report_'):
+            return jsonify({'error': 'Invalid file name'}), 400
+            
+        filepath = os.path.join(os.getcwd(), 'reports', filename)
+        
+        if os.path.exists(filepath):
+            return send_file(filepath, as_attachment=True, download_name=filename)
+        else:
+            return jsonify({'error': 'Report file not found'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

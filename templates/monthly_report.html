@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azure Service Principal Monthly Report - {{ report_period }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #0078d4 0%, #005a9e 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header .period {
+            font-size: 1.3em;
+            opacity: 0.9;
+            margin-bottom: 10px;
+        }
+
+        .header .generated {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .summary-section {
+            margin-bottom: 40px;
+        }
+
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .summary-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-left: 5px solid #0078d4;
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+            transition: transform 0.3s ease;
+        }
+
+        .summary-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+
+        .summary-card .number {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #0078d4;
+            margin-bottom: 10px;
+        }
+
+        .summary-card .label {
+            font-size: 1em;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .section-title {
+            font-size: 1.8em;
+            color: #0078d4;
+            margin-bottom: 20px;
+            border-bottom: 3px solid #0078d4;
+            padding-bottom: 10px;
+        }
+
+        .details-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+
+        .details-table th {
+            background: linear-gradient(135deg, #0078d4 0%, #005a9e 100%);
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        .details-table td {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .details-table tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .details-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-style: italic;
+        }
+
+        .no-data .icon {
+            font-size: 3em;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .footer {
+            background: #f8f9fa;
+            padding: 30px 40px;
+            text-align: center;
+            color: #666;
+            border-top: 1px solid #eee;
+        }
+
+        .footer .logo {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #0078d4;
+            margin-bottom: 10px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            margin-top: 30px;
+        }
+
+        .chart-placeholder {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            border-radius: 10px;
+            padding: 30px;
+            text-align: center;
+            color: #0078d4;
+            font-weight: 500;
+        }
+
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            
+            .container {
+                box-shadow: none;
+                border-radius: 0;
+            }
+            
+            .summary-card:hover {
+                transform: none;
+                box-shadow: none;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            .details-table {
+                font-size: 0.9em;
+            }
+            
+            .details-table th,
+            .details-table td {
+                padding: 10px 8px;
+            }
+        }
+
+        .emoji {
+            font-size: 1.2em;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><span class="emoji">📊</span>Azure Service Principal Monthly Report</h1>
+            <div class="period"><span class="emoji">📅</span>{{ report_period }}</div>
+            <div class="generated">Report generated on {{ generated_date }}</div>
+        </div>
+
+        <div class="content">
+            <!-- Summary Statistics -->
+            <div class="summary-section">
+                <h2 class="section-title"><span class="emoji">📈</span>Summary Statistics</h2>
+                <div class="summary-cards">
+                    <div class="summary-card">
+                        <div class="number">{{ summary.total_created }}</div>
+                        <div class="label">Total SPNs Created</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="number">{{ summary.unique_users }}</div>
+                        <div class="label">Unique Users</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="number">{{ summary.unique_emails }}</div>
+                        <div class="label">Unique Email Addresses</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detailed List -->
+            <div class="details-section">
+                <h2 class="section-title"><span class="emoji">📋</span>Detailed Service Principal List</h2>
+                
+                {% if details %}
+                <table class="details-table">
+                    <thead>
+                        <tr>
+                            <th><span class="emoji">📅</span>Creation Date</th>
+                            <th><span class="emoji">👤</span>User Name</th>
+                            <th><span class="emoji">📧</span>Email Address</th>
+                            <th><span class="emoji">🔑</span>Service Principal Name</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for detail in details %}
+                        <tr>
+                            <td>{{ detail.created_date.strftime('%Y-%m-%d') }}</td>
+                            <td>{{ detail.user_name }}</td>
+                            <td>{{ detail.email }}</td>
+                            <td><strong>{{ detail.app_name }}</strong></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="no-data">
+                    <div class="icon">📭</div>
+                    <p>No Service Principals were created during this period.</p>
+                </div>
+                {% endif %}
+            </div>
+
+            {% if summary.total_created > 0 %}
+            <!-- Additional Statistics -->
+            <div class="stats-grid">
+                <div class="chart-placeholder">
+                    <h3><span class="emoji">📊</span>Daily Creation Trend</h3>
+                    <p>{{ summary.total_created }} SPNs created across {{ details|length if details else 0 }} entries</p>
+                </div>
+                <div class="chart-placeholder">
+                    <h3><span class="emoji">👥</span>User Activity</h3>
+                    <p>{{ summary.unique_users }} users actively created Service Principals</p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="footer">
+            <div class="logo"><span class="emoji">🔐</span>Azure Service Principal Management System</div>
+            <p>This is an automated report generated by the SPN Management Platform.</p>
+            <p><small>For questions or issues, contact your Azure administrator.</small></p>
+        </div>
+    </div>
+</body>
+</html>

@@ -262,3 +262,83 @@ class UserService:
             return []
         finally:
             conn.close()
+
+    def get_monthly_report_data(self, year, month):
+        """
+        Gets Service Principal creation report for a specific month/year.
+        Returns statistics and detailed list of created SPNs.
+        """
+        conn = self.db_config.connect()
+        if not conn:
+            return None
+
+        try:
+            cursor = conn.cursor()
+            
+            # Get summary statistics
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total_created,
+                    COUNT(DISTINCT user_name) as unique_users,
+                    COUNT(DISTINCT email) as unique_emails
+                FROM user_info 
+                WHERE YEAR(created_date) = ? AND MONTH(created_date) = ?
+            """, (year, month))
+            
+            summary_row = cursor.fetchone()
+            summary = {
+                'total_created': summary_row[0] if summary_row else 0,
+                'unique_users': summary_row[1] if summary_row else 0,
+                'unique_emails': summary_row[2] if summary_row else 0,
+                'year': year,
+                'month': month
+            }
+            
+            # Get detailed list of created SPNs
+            cursor.execute("""
+                SELECT 
+                    user_name, 
+                    email, 
+                    app_name, 
+                    created_date,
+                    DAY(created_date) as day_of_month
+                FROM user_info 
+                WHERE YEAR(created_date) = ? AND MONTH(created_date) = ?
+                ORDER BY created_date DESC
+            """, (year, month))
+            
+            columns = [column[0] for column in cursor.description]
+            details = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            
+            return {
+                'summary': summary,
+                'details': details
+            }
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch monthly report data: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_current_month_report(self):
+        """
+        Gets Service Principal creation report for the current month.
+        """
+        now = datetime.now()
+        return self.get_monthly_report_data(now.year, now.month)
+
+    def get_previous_month_report(self):
+        """
+        Gets Service Principal creation report for the previous month.
+        """
+        now = datetime.now()
+        # Handle year rollover
+        if now.month == 1:
+            prev_year = now.year - 1
+            prev_month = 12
+        else:
+            prev_year = now.year
+            prev_month = now.month - 1
+            
+        return self.get_monthly_report_data(prev_year, prev_month)

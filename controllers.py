@@ -305,3 +305,186 @@ class AppController:
             except Exception as e:
                 print(f"[ERROR] Failed to send expired email to {secret['id']}: {e}")
         return {'message': f'Expired notifications sent to {len(expired_secrets)} user(s).'}, 200
+
+    def generate_monthly_report(self, year=None, month=None, send_email=True, admin_email="azurespnautomation@gmail.com", output_format="html"):
+        """
+        Generates monthly Service Principal creation report in HTML or email format.
+        
+        Args:
+            year: Report year (defaults to previous month)
+            month: Report month (defaults to previous month)  
+            send_email: Whether to send email (default: True)
+            admin_email: Email recipient for reports
+            output_format: 'html' for standalone HTML file, 'email' for email HTML
+        """
+        try:
+            # Use previous month if no specific month provided
+            if year is None or month is None:
+                report_data = self.user_service.get_previous_month_report()
+            else:
+                report_data = self.user_service.get_monthly_report_data(year, month)
+            
+            if not report_data:
+                return {'error': 'Failed to generate report data'}, 500
+            
+            summary = report_data['summary']
+            details = report_data['details']
+            
+            # Month names for better formatting
+            month_names = {
+                1: 'January', 2: 'February', 3: 'March', 4: 'April',
+                5: 'May', 6: 'June', 7: 'July', 8: 'August',
+                9: 'September', 10: 'October', 11: 'November', 12: 'December'
+            }
+            
+            month_name = month_names.get(summary['month'], str(summary['month']))
+            report_period = f"{month_name} {summary['year']}"
+            
+            # Generate HTML report using template
+            if output_format == "html":
+                return self._generate_html_report(summary, details, report_period)
+            
+            # Generate email HTML (legacy format)
+            details_html = ""
+            if details:
+                details_html = """
+                <h3>📋 Detailed List:</h3>
+                <table style="border-collapse: collapse; width: 100%; margin-top: 10px;">
+                    <thead>
+                        <tr style="background-color: #f0f0f0;">
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Date</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">User Name</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Email</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Service Principal Name</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                """
+                
+                for detail in details:
+                    created_date_str = detail['created_date'].strftime('%Y-%m-%d')
+                    details_html += f"""
+                        <tr>
+                            <td style="border: 1px solid #ddd; padding: 8px;">{created_date_str}</td>
+                            <td style="border: 1px solid #ddd; padding: 8px;">{detail['user_name']}</td>
+                            <td style="border: 1px solid #ddd; padding: 8px;">{detail['email']}</td>
+                            <td style="border: 1px solid #ddd; padding: 8px;">{detail['app_name']}</td>
+                        </tr>
+                    """
+                
+                details_html += """
+                    </tbody>
+                </table>
+                """
+            else:
+                details_html = "<p>🔹 No Service Principals were created during this period.</p>"
+            
+            email_body_html = f"""
+            <html>
+              <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+                <div style="max-width: 800px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #0078d4; border-bottom: 2px solid #0078d4; padding-bottom: 10px;">
+                        📊 Azure Service Principal Monthly Report
+                    </h2>
+                    
+                    <h3>📅 Report Period: {report_period}</h3>
+                    
+                    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
+                        <h3 style="margin-top: 0; color: #0078d4;">📈 Summary Statistics</h3>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Total Service Principals Created:</strong></td>
+                                <td style="padding: 8px; border-bottom: 1px solid #ddd; color: #0078d4; font-weight: bold;">{summary['total_created']}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Unique Users:</strong></td>
+                                <td style="padding: 8px; border-bottom: 1px solid #ddd;">{summary['unique_users']}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px;"><strong>Unique Email Addresses:</strong></td>
+                                <td style="padding: 8px;">{summary['unique_emails']}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    {details_html}
+                    
+                    <div style="margin-top: 30px; padding: 15px; background-color: #e8f4fd; border-radius: 5px;">
+                        <p style="margin: 0;"><strong>📧 Report generated on:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST</p>
+                        <p style="margin: 5px 0 0 0;"><small>This is an automated report from Azure Service Principal Management System.</small></p>
+                    </div>
+                </div>
+              </body>
+            </html>
+            """
+            
+            if send_email:
+                try:
+                    from flask_mail import Message
+                    msg = Message(
+                        subject=f"📊 Monthly SPN Report - {report_period} ({summary['total_created']} Created)",
+                        recipients=[admin_email],
+                        html=email_body_html
+                    )
+                    self.mail.send(msg)
+                    print(f"[INFO] Monthly report sent to {admin_email}")
+                except Exception as e:
+                    print(f"[ERROR] Failed to send monthly report email: {e}")
+                    return {'error': f'Report generated but failed to send email: {str(e)}'}, 500
+            
+            return {
+                'message': f'Monthly report for {report_period} generated successfully.',
+                'report_data': {
+                    'period': report_period,
+                    'summary': summary,
+                    'total_apps': len(details)
+                },
+                'email_sent': send_email
+            }, 200
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to generate monthly report: {e}")
+            return {'error': f'Failed to generate monthly report: {str(e)}'}, 500
+
+    def _generate_html_report(self, summary, details, report_period):
+        """
+        Generates standalone HTML report using Jinja2 template.
+        """
+        try:
+            from flask import render_template
+            import os
+            from datetime import datetime
+            
+            # Generate HTML content
+            html_content = render_template('monthly_report.html', 
+                summary=summary,
+                details=details,
+                report_period=report_period,
+                generated_date=datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')
+            )
+            
+            # Save HTML file
+            filename = f"SPN_Monthly_Report_{summary['year']}_{summary['month']:02d}.html"
+            filepath = os.path.join(os.getcwd(), 'reports', filename)
+            
+            # Create reports directory if it doesn't exist
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            return {
+                'message': f'HTML report generated successfully for {report_period}.',
+                'report_data': {
+                    'period': report_period,
+                    'summary': summary,
+                    'total_apps': len(details)
+                },
+                'html_file': filepath,
+                'filename': filename,
+                'html_content': html_content  # For API response
+            }, 200
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to generate HTML report: {e}")
+            return {'error': f'Failed to generate HTML report: {str(e)}'}, 500
