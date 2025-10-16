@@ -80,7 +80,8 @@ def notify_expiry():
 @app.route('/notify_expired', methods=['POST'])
 def notify_expired():
     try:
-        response, status = app_controller.send_expired_notifications()
+        # Use a 2-day resend interval by default, matching the upcoming expiry notifications
+        response, status = app_controller.send_expired_notifications(resend_interval_days=2)
         return jsonify(response), status
     except Exception as e:
         return jsonify({'error': str(e)}), 500

@@ -113,7 +113,32 @@ class UserService:
         finally:
             conn.close()
 
-    # REMOVED: get_latest_secret (no latest column in schema)
+    def get_latest_secret(self, app_name):
+        """
+        Gets the most recent secret for an application based on created_date.
+        """
+        conn = self.db_config.connect()
+        if not conn:
+            return None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT TOP 1 id, app_name, key_id, end_date, created_date, display_name,
+                       notified_upcoming, notified_expired, notified_renewal, last_updated_at, user_info_id
+                FROM app_secrets
+                WHERE app_name = ?
+                ORDER BY created_date DESC
+            """, (app_name,))
+            row = cursor.fetchone()
+            if row:
+                columns = [column[0] for column in cursor.description]
+                return dict(zip(columns, row))
+            return None
+        except Exception as e:
+            print(f"[ERROR] Failed to get latest secret: {e}")
+            return None
+        finally:
+            conn.close()
 
     def update_secret_expiry(self, secret_id, new_end_date):
         """
@@ -147,18 +172,20 @@ class UserService:
                 return
             cursor.execute(f"""
                 UPDATE app_secrets
-                SET {column} = 1, last_notified_at = GETDATE()
+                SET {column} = 1, last_updated_at = GETDATE()
                 WHERE id = ?
             """, (secret_id,))
             conn.commit()
+            print(f"[DEBUG] Marked secret {secret_id} as notified for {column}")
         except Exception as e:
             print(f"[ERROR] Failed to update {column} flag for secret_id {secret_id}: {e}")
         finally:
             conn.close()
 
-    def get_expiring_secrets(self, days=30):
+    def get_expiring_secrets(self, days=30, resend_interval_days=2):
         """
         Returns secrets expiring in next 'days' days.
+        Only returns secrets that haven't been notified or last notification was sent more than resend_interval_days ago.
         """
         conn = self.db_config.connect()
         if not conn:
@@ -172,19 +199,23 @@ class UserService:
                        notified_upcoming, notified_expired, notified_renewal, last_updated_at, user_info_id
                 FROM app_secrets
                 WHERE end_date BETWEEN ? AND ?
-                AND (notified_upcoming = 0 OR last_updated_at <= DATEADD(day, -3, GETDATE()) OR last_updated_at IS NULL)
-            ''', (now, future))
+                AND (notified_upcoming = 0 OR 
+                     (notified_upcoming = 1 AND last_updated_at <= DATEADD(day, -?, GETDATE())))
+            ''', (now, future, resend_interval_days))
+            results = cursor.fetchall()
+            print(f"[DEBUG] Found {len(results)} expiring secrets (between {now} and {future}, resend interval: {resend_interval_days} days)")
             columns = [column[0] for column in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+            return [dict(zip(columns, row)) for row in results]
         except Exception as e:
             print(f"[ERROR] Failed to fetch expiring secrets: {e}")
             return []
         finally:
             conn.close()
 
-    def get_expired_secrets(self):
+    def get_expired_secrets(self, resend_interval_days=2):
         """
         Returns secrets that have expired.
+        Only returns secrets that haven't been notified for expiry or last notification was sent more than resend_interval_days ago.
         """
         conn = self.db_config.connect()
         if not conn:
@@ -197,10 +228,13 @@ class UserService:
                        notified_upcoming, notified_expired, notified_renewal, last_updated_at, user_info_id
                 FROM app_secrets
                 WHERE end_date < ?
-                AND (notified_expired = 0 OR last_updated_at <= DATEADD(day, -3, GETDATE()) OR last_updated_at IS NULL)
-            ''', (now,))
+                AND (notified_expired = 0 OR 
+                     (notified_expired = 1 AND last_updated_at <= DATEADD(day, -?, GETDATE())))
+            ''', (now, resend_interval_days))
+            results = cursor.fetchall()
+            print(f"[DEBUG] Found {len(results)} expired secrets (before {now}, resend interval: {resend_interval_days} days)")
             columns = [column[0] for column in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+            return [dict(zip(columns, row)) for row in results]
         except Exception as e:
             print(f"[ERROR] Failed to fetch expired secrets: {e}")
             return []

@@ -72,11 +72,11 @@ class AppController:
 
 
         # Prepare secret_info for app_secrets
+        # Prepare secret_info for app_secrets
         secret_info = {
             'key_id': 'initial',  # You may want to fetch the real key_id from Azure response
             'end_date': expires_on,
-            'display_name': f"{app_name} secret",
-            'latest': 1
+            'display_name': f"{app_name} secret"
         }
         success = self.user_service.store_user_and_secret(user_name, email, app_name, secret_info)
         if not success:
@@ -157,8 +157,7 @@ class AppController:
         secret_info = {
             'key_id': 'renewed',  # You may want to fetch the real key_id from Azure response
             'end_date': new_expiry_date,
-            'display_name': f"{app_name} secret renewed",
-            'latest': 1
+            'display_name': f"{app_name} secret renewed"
         }
         success = self.user_service.add_new_secret(app_name, secret_info)
         if not success:
@@ -223,8 +222,8 @@ class AppController:
         Checks Azure for the true latest secret expiry and sends notifications.
         Resends every `resend_interval_days` days if not renewed.
         """
-        print(f"[INFO] Starting expiry notification check for {days} days.")
-        expiring_secrets = self.user_service.get_expiring_secrets(days)
+        print(f"[INFO] Starting expiry notification check for {days} days with {resend_interval_days}-day resend interval.")
+        expiring_secrets = self.user_service.get_expiring_secrets(days, resend_interval_days)
         notifications_sent = 0
         for secret in expiring_secrets:
             try:
@@ -258,13 +257,17 @@ class AppController:
                 self.mail.send(msg)
                 self.user_service.mark_secret_notified(secret['id'], column="notified_upcoming")
                 notifications_sent += 1
+                print(f"[INFO] Sent upcoming expiry notification for {secret['app_name']} to {email}")
             except Exception as e:
                 print(f"[ERROR] Failed to process notifications for secret {secret['id']}: {e}")
         return {'message': f'Notification check complete. Sent {notifications_sent} notifications.'}, 200
 
-    # NOTE: This method could also be updated with the new logic for consistency.
-    def send_expired_notifications(self):
-        expired_secrets = self.user_service.get_expired_secrets()
+    def send_expired_notifications(self, resend_interval_days=2):
+        """
+        Sends notifications for expired secrets with configurable resend interval.
+        """
+        print(f"[INFO] Starting expired secrets notification check with {resend_interval_days}-day resend interval.")
+        expired_secrets = self.user_service.get_expired_secrets(resend_interval_days)
         if not expired_secrets:
             print("[INFO] No expired secrets found.")
             return {'message': 'No expired secrets found.'}, 200
@@ -298,7 +301,7 @@ class AppController:
                 )
                 self.mail.send(msg)
                 self.user_service.mark_secret_notified(secret['id'], column="notified_expired")
-                print(f"[DEBUG] Marked expired notification sent for: {secret['app_name']}")
+                print(f"[INFO] Sent expired notification for {secret['app_name']} to {email}")
             except Exception as e:
                 print(f"[ERROR] Failed to send expired email to {secret['id']}: {e}")
         return {'message': f'Expired notifications sent to {len(expired_secrets)} user(s).'}, 200
