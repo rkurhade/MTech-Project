@@ -43,6 +43,18 @@ def home():
 def dashboard():
     return render_template('dashboard.html')
 
+@app.route('/debug/test_db')
+def test_database():
+    """Debug endpoint to test database connectivity for reports."""
+    try:
+        success = user_service.test_database_connection()
+        return jsonify({
+            'database_test': 'passed' if success else 'failed',
+            'message': 'Check server logs for detailed debug information'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 EMAIL_REGEX = re.compile(r"^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$")
 
 @app.route('/create_app', methods=['POST'])
@@ -127,16 +139,14 @@ def current_month_report():
     Get current month Service Principal creation statistics (JSON only).
     """
     try:
-        response, status = app_controller.generate_monthly_report(
-            send_email=False
-        )
-        # Change to current month
+        # Get current month data specifically
         from datetime import datetime
         now = datetime.now()
         response, status = app_controller.generate_monthly_report(
             year=now.year, 
             month=now.month, 
-            send_email=False
+            send_email=False,
+            output_format="json"
         )
         return jsonify(response), status
     except Exception as e:

@@ -126,14 +126,14 @@
 </head>
 <body>
     <div class="container">
-        <h1><span class="emoji">🔐</span>SPN Management Dashboard</h1>
+        <h1><span class="emoji">🔐</span>Service Principal Management Dashboard</h1>
         
         <div class="dashboard-grid">
             <!-- View Current Month Report -->
             <div class="dashboard-card current-month">
                 <h3><span class="emoji">📊</span>Current Month Report</h3>
                 <p>View Service Principal creation statistics for the current month</p>
-                <a href="/view_report" class="btn" target="_blank">View Current Month</a>
+                <a href="javascript:void(0)" class="btn" onclick="viewCurrentMonth()">View Current Month</a>
             </div>
 
             <!-- View Previous Month Report -->
@@ -194,16 +194,29 @@
     </div>
 
     <script>
+        function viewCurrentMonth() {
+            const now = new Date();
+            let currentMonth = now.getMonth() + 1; // Convert to 1-based (1=Jan, 10=Oct)
+            let currentYear = now.getFullYear();
+            
+            console.log(`Viewing current month: ${currentMonth}/${currentYear}`);
+            window.open(`/view_report?year=${currentYear}&month=${currentMonth}`, '_blank');
+        }
+
         function viewPreviousMonth() {
             const now = new Date();
-            let prevMonth = now.getMonth(); // 0-based
-            let prevYear = now.getFullYear();
+            let currentMonth = now.getMonth() + 1; // Convert to 1-based (1=Jan, 10=Oct)
+            let currentYear = now.getFullYear();
+            
+            let prevMonth = currentMonth - 1;
+            let prevYear = currentYear;
             
             if (prevMonth === 0) {
-                prevMonth = 12;
+                prevMonth = 12;  // December
                 prevYear--;
             }
             
+            console.log(`Current: ${currentMonth}/${currentYear}, Previous: ${prevMonth}/${prevYear}`);
             window.open(`/view_report?year=${prevYear}&month=${prevMonth}`, '_blank');
         }
 

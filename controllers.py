@@ -318,13 +318,18 @@ class AppController:
             output_format: 'html' for standalone HTML file, 'email' for email HTML
         """
         try:
+            print(f"[DEBUG] generate_monthly_report called with year={year}, month={month}, send_email={send_email}, output_format={output_format}")
+            
             # Use previous month if no specific month provided
             if year is None or month is None:
+                print("[DEBUG] Using previous month report")
                 report_data = self.user_service.get_previous_month_report()
             else:
+                print(f"[DEBUG] Using specific month: {year}-{month}")
                 report_data = self.user_service.get_monthly_report_data(year, month)
             
             if not report_data:
+                print("[ERROR] report_data is None or empty")
                 return {'error': 'Failed to generate report data'}, 500
             
             summary = report_data['summary']
@@ -343,6 +348,24 @@ class AppController:
             # Generate HTML report using template
             if output_format == "html":
                 return self._generate_html_report(summary, details, report_period)
+            
+            # Generate JSON format for API responses
+            if output_format == "json":
+                return {
+                    'message': f'Monthly report data for {report_period}',
+                    'report_data': {
+                        'period': report_period,
+                        'summary': summary,
+                        'details': [
+                            {
+                                'created_date': detail['created_date'].strftime('%Y-%m-%d'),
+                                'user_name': detail['user_name'],
+                                'email': detail['email'],
+                                'app_name': detail['app_name']
+                            } for detail in details
+                        ] if details else []
+                    }
+                }, 200
             
             # Generate email HTML (legacy format)
             details_html = ""
@@ -420,17 +443,27 @@ class AppController:
             
             if send_email:
                 try:
+                    print(f"[DEBUG] Attempting to send email to {admin_email}")
                     from flask_mail import Message
                     msg = Message(
                         subject=f"📊 Monthly SPN Report - {report_period} ({summary['total_created']} Created)",
                         recipients=[admin_email],
                         html=email_body_html
                     )
+                    print("[DEBUG] Email message created, attempting to send...")
                     self.mail.send(msg)
-                    print(f"[INFO] Monthly report sent to {admin_email}")
+                    print(f"[INFO] Monthly report sent successfully to {admin_email}")
                 except Exception as e:
                     print(f"[ERROR] Failed to send monthly report email: {e}")
-                    return {'error': f'Report generated but failed to send email: {str(e)}'}, 500
+                    # Still return success if report was generated, just mention email failed
+                    return {
+                        'error': f'Report generated successfully but failed to send email: {str(e)}',
+                        'report_data': {
+                            'period': report_period,
+                            'summary': summary,
+                            'total_apps': len(details)
+                        }
+                    }, 500
             
             return {
                 'message': f'Monthly report for {report_period} generated successfully.',

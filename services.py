@@ -268,8 +268,10 @@ class UserService:
         Gets Service Principal creation report for a specific month/year.
         Returns statistics and detailed list of created SPNs.
         """
+        print(f"[DEBUG] Generating monthly report for year={year}, month={month}")
         conn = self.db_config.connect()
         if not conn:
+            print("[ERROR] Database connection failed in get_monthly_report_data")
             return None
 
         try:
@@ -293,6 +295,7 @@ class UserService:
                 'year': year,
                 'month': month
             }
+            print(f"[DEBUG] Summary data: {summary}")
             
             # Get detailed list of created SPNs
             cursor.execute("""
@@ -309,6 +312,7 @@ class UserService:
             
             columns = [column[0] for column in cursor.description]
             details = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            print(f"[DEBUG] Found {len(details)} detailed records")
             
             return {
                 'summary': summary,
@@ -342,3 +346,34 @@ class UserService:
             prev_month = now.month - 1
             
         return self.get_monthly_report_data(prev_year, prev_month)
+
+    def test_database_connection(self):
+        """
+        Test database connection and basic queries for debugging.
+        """
+        print("[DEBUG] Testing database connection...")
+        conn = self.db_config.connect()
+        if not conn:
+            print("[ERROR] Database connection failed!")
+            return False
+        
+        try:
+            cursor = conn.cursor()
+            # Test basic query
+            cursor.execute("SELECT COUNT(*) FROM user_info")
+            count = cursor.fetchone()[0]
+            print(f"[DEBUG] Total records in user_info: {count}")
+            
+            # Test date-based query
+            cursor.execute("SELECT TOP 5 user_name, email, app_name, created_date FROM user_info ORDER BY created_date DESC")
+            recent = cursor.fetchall()
+            print(f"[DEBUG] Recent records: {len(recent)} found")
+            for record in recent:
+                print(f"[DEBUG] Record: {record}")
+            
+            return True
+        except Exception as e:
+            print(f"[ERROR] Database test failed: {e}")
+            return False
+        finally:
+            conn.close()
