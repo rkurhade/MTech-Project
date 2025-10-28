@@ -55,13 +55,13 @@ class UserService:
             # Get user_info_id
             cursor.execute("SELECT TOP 1 id FROM user_info WHERE app_name = ? ORDER BY created_date DESC", (app_name,))
             user_info_id = cursor.fetchone()[0]
-            # Insert app_secrets
+            # Insert app_secrets - Set notified_renewal = 1 for initial secrets to prevent duplicate emails
             cursor.execute("""
                 INSERT INTO app_secrets (
                     app_name, key_id, end_date, created_date, display_name,
                     notified_upcoming, notified_expired, notified_renewal,
                     last_updated_at, user_info_id
-                ) VALUES (?, ?, ?, GETDATE(), ?, 0, 0, 0, GETDATE(), ?)
+                ) VALUES (?, ?, ?, GETDATE(), ?, 0, 0, 1, GETDATE(), ?)
             """, (
                 app_name,
                 secret_info['key_id'],
