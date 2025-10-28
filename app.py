@@ -6,6 +6,7 @@ from services import DatabaseConfig, UserService
 from controllers import AppController
 from flask_mail import Mail
 from dotenv import load_dotenv
+from datetime import datetime
 import re
 import os
 
@@ -54,6 +55,49 @@ def test_database():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/debug/test_email')
+def test_email():
+    """Debug endpoint to test email configuration."""
+    try:
+        test_email = request.args.get('email', 'test@example.com')
+        from flask_mail import Message
+        msg = Message(
+            subject="🔧 Email Test from Azure SPN System",
+            recipients=[test_email],
+            html="""
+            <html>
+              <body style="font-family: Arial, sans-serif;">
+                <h2>Email Test Successful! ✅</h2>
+                <p>This is a test email from your Azure Service Principal Management System.</p>
+                <p>If you received this email, your email configuration is working correctly.</p>
+                <p><strong>Timestamp:</strong> {}</p>
+              </body>
+            </html>
+            """.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        )
+        mail.send(msg)
+        return jsonify({
+            'email_test': 'passed',
+            'message': f'Test email sent successfully to {test_email}',
+            'mail_config': {
+                'server': app.config.get('MAIL_SERVER'),
+                'port': app.config.get('MAIL_PORT'),
+                'use_tls': app.config.get('MAIL_USE_TLS'),
+                'username': app.config.get('MAIL_USERNAME')
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            'email_test': 'failed', 
+            'error': str(e),
+            'mail_config': {
+                'server': app.config.get('MAIL_SERVER'),
+                'port': app.config.get('MAIL_PORT'),
+                'use_tls': app.config.get('MAIL_USE_TLS'),
+                'username': app.config.get('MAIL_USERNAME')
+            }
+        }), 500
 
 EMAIL_REGEX = re.compile(r"^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$")
 
@@ -119,6 +163,7 @@ def generate_monthly_report():
         year = request.args.get('year', type=int)
         month = request.args.get('month', type=int)
         admin_email = request.args.get('admin_email', 'azurespnautomation@gmail.com')
+        include_all_apps = request.args.get('include_all', 'false').lower() == 'true'
         
         # Send email for POST, return JSON for GET
         send_email = (request.method == 'POST')
@@ -127,7 +172,8 @@ def generate_monthly_report():
             year=year, 
             month=month, 
             send_email=send_email, 
-            admin_email=admin_email
+            admin_email=admin_email,
+            include_all_apps=include_all_apps
         )
         return jsonify(response), status
     except Exception as e:
@@ -183,16 +229,19 @@ def view_html_report():
     Query parameters:
     - year: specific year (optional, defaults to previous month)
     - month: specific month (optional, defaults to previous month)
+    - include_all: 'true' to include all apps, 'false' for Flask-created only
     """
     try:
         year = request.args.get('year', type=int)
         month = request.args.get('month', type=int)
+        include_all_apps = request.args.get('include_all', 'false').lower() == 'true'
         
         response, status = app_controller.generate_monthly_report(
             year=year, 
             month=month, 
             send_email=False,
-            output_format="html"
+            output_format="html",
+            include_all_apps=include_all_apps
         )
         
         if status == 200 and 'html_content' in response:

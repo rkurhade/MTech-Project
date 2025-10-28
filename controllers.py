@@ -306,7 +306,7 @@ class AppController:
                 print(f"[ERROR] Failed to send expired email to {secret['id']}: {e}")
         return {'message': f'Expired notifications sent to {len(expired_secrets)} user(s).'}, 200
 
-    def generate_monthly_report(self, year=None, month=None, send_email=True, admin_email="azurespnautomation@gmail.com", output_format="html"):
+    def generate_monthly_report(self, year=None, month=None, send_email=True, admin_email="azurespnautomation@gmail.com", output_format="html", include_all_apps=False):
         """
         Generates monthly Service Principal creation report in HTML or email format.
         
@@ -316,6 +316,7 @@ class AppController:
             send_email: Whether to send email (default: True)
             admin_email: Email recipient for reports
             output_format: 'html' for standalone HTML file, 'email' for email HTML
+            include_all_apps: If True, includes all apps from database, not just Flask-created ones
         """
         try:
             print(f"[DEBUG] generate_monthly_report called with year={year}, month={month}, send_email={send_email}, output_format={output_format}")
@@ -323,10 +324,22 @@ class AppController:
             # Use previous month if no specific month provided
             if year is None or month is None:
                 print("[DEBUG] Using previous month report")
-                report_data = self.user_service.get_previous_month_report()
+                if include_all_apps:
+                    # For previous month, we need to calculate it manually when include_all_apps=True
+                    from datetime import datetime
+                    now = datetime.now()
+                    if now.month == 1:
+                        prev_year = now.year - 1
+                        prev_month = 12
+                    else:
+                        prev_year = now.year
+                        prev_month = now.month - 1
+                    report_data = self.user_service.get_monthly_report_data(prev_year, prev_month, include_all_apps=True)
+                else:
+                    report_data = self.user_service.get_previous_month_report()
             else:
-                print(f"[DEBUG] Using specific month: {year}-{month}")
-                report_data = self.user_service.get_monthly_report_data(year, month)
+                print(f"[DEBUG] Using specific month: {year}-{month}, include_all_apps: {include_all_apps}")
+                report_data = self.user_service.get_monthly_report_data(year, month, include_all_apps=include_all_apps)
             
             if not report_data:
                 print("[ERROR] report_data is None or empty")
@@ -433,7 +446,7 @@ class AppController:
                     {details_html}
                     
                     <div style="margin-top: 30px; padding: 15px; background-color: #e8f4fd; border-radius: 5px;">
-                        <p style="margin: 0;"><strong>📧 Report generated on:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST</p>
+                        <p style="margin: 0;"><strong>📧 Report generated on:</strong> {datetime.now(pytz.timezone("Asia/Kolkata")).strftime('%Y-%m-%d %H:%M:%S')} IST</p>
                         <p style="margin: 5px 0 0 0;"><small>This is an automated report from Azure Service Principal Management System.</small></p>
                     </div>
                 </div>
@@ -444,17 +457,22 @@ class AppController:
             if send_email:
                 try:
                     print(f"[DEBUG] Attempting to send email to {admin_email}")
+                    print(f"[DEBUG] Email settings - Server: {self.mail.app.config.get('MAIL_SERVER')}, Port: {self.mail.app.config.get('MAIL_PORT')}")
                     from flask_mail import Message
                     msg = Message(
                         subject=f"📊 Monthly SPN Report - {report_period} ({summary['total_created']} Created)",
                         recipients=[admin_email],
                         html=email_body_html
                     )
-                    print("[DEBUG] Email message created, attempting to send...")
+                    print(f"[DEBUG] Email message created for {admin_email}, subject: {msg.subject}")
+                    print("[DEBUG] Attempting to send via Flask-Mail...")
                     self.mail.send(msg)
-                    print(f"[INFO] Monthly report sent successfully to {admin_email}")
+                    print(f"[SUCCESS] Monthly report sent successfully to {admin_email}")
                 except Exception as e:
+                    import traceback
+                    error_details = traceback.format_exc()
                     print(f"[ERROR] Failed to send monthly report email: {e}")
+                    print(f"[ERROR] Full traceback: {error_details}")
                     # Still return success if report was generated, just mention email failed
                     return {
                         'error': f'Report generated successfully but failed to send email: {str(e)}',
@@ -462,7 +480,8 @@ class AppController:
                             'period': report_period,
                             'summary': summary,
                             'total_apps': len(details)
-                        }
+                        },
+                        'email_error_details': str(e)
                     }, 500
             
             return {
@@ -493,7 +512,7 @@ class AppController:
                 summary=summary,
                 details=details,
                 report_period=report_period,
-                generated_date=datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')
+                generated_date=datetime.now(pytz.timezone("Asia/Kolkata")).strftime('%Y-%m-%d %H:%M:%S IST')
             )
             
             # Save HTML file

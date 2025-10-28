@@ -228,6 +228,9 @@
         <div class="header">
             <h1><span class="emoji">📊</span>Azure Service Principal Monthly Report</h1>
             <div class="period"><span class="emoji">📅</span>{{ report_period }}</div>
+            {% if summary.report_type %}
+            <div class="generated" style="color: #666; font-size: 0.9em; margin: 5px 0;">📋 {{ summary.report_type }}</div>
+            {% endif %}
             <div class="generated">Report generated on {{ generated_date }}</div>
         </div>
 
