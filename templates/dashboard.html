@@ -171,40 +171,12 @@
                 <a href="javascript:void(0)" class="btn" onclick="viewCustomReport()">Generate Report</a>
             </div>
 
-            <!-- System Status -->
-            <div class="dashboard-card">
-                <h3><span class="emoji">🔍</span>System Status</h3>
-                <p>Check database connectivity and system health</p>
-                <a href="javascript:void(0)" class="btn" onclick="checkSystemStatus()">Check Status</a>
-                <div id="statusResult" style="margin-top: 15px; padding: 10px; border-radius: 5px; display: none;"></div>
-            </div>
-
             <!-- Quick Stats -->
             <div class="dashboard-card">
                 <h3><span class="emoji">📈</span>Quick Stats</h3>
                 <p>View total Service Principals created through the system</p>
                 <a href="javascript:void(0)" class="btn" onclick="getQuickStats()">View Stats</a>
                 <div id="statsResult" style="margin-top: 15px; padding: 10px; border-radius: 5px; display: none;"></div>
-            </div>
-
-            <!-- Create New SPN -->
-            <div class="dashboard-card">
-                <h3><span class="emoji">➕</span>Create Service Principal</h3>
-                <p>Create a new Service Principal through the automated system</p>
-                <div class="form-group">
-                    <label for="userName">User Name:</label>
-                    <input type="text" id="userName" placeholder="Your name">
-                </div>
-                <div class="form-group">
-                    <label for="userEmail">Email:</label>
-                    <input type="email" id="userEmail" placeholder="your.email@domain.com">
-                </div>
-                <div class="form-group">
-                    <label for="appName">Application Name:</label>
-                    <input type="text" id="appName" placeholder="MyApp-ServicePrincipal">
-                </div>
-                <a href="javascript:void(0)" class="btn" onclick="createServicePrincipal()">Create SPN</a>
-                <div id="createResult" style="margin-top: 15px; padding: 10px; border-radius: 5px; display: none;"></div>
             </div>
 
 
@@ -244,31 +216,6 @@
             window.open(`/view_report?year=${year}&month=${month}`, '_blank');
         }
 
-        function checkSystemStatus() {
-            const statusDiv = document.getElementById('statusResult');
-            statusDiv.style.display = 'block';
-            statusDiv.innerHTML = '<p style="color: #666;">🔄 Checking system status...</p>';
-            
-            fetch('/debug/test_db')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.database_test === 'passed') {
-                        statusDiv.innerHTML = '<p style="color: #28a745; font-weight: bold;">✅ System Status: Healthy</p><p style="font-size: 0.9em;">Database connection successful</p>';
-                        statusDiv.style.backgroundColor = '#d4edda';
-                        statusDiv.style.borderLeft = '4px solid #28a745';
-                    } else {
-                        statusDiv.innerHTML = '<p style="color: #dc3545; font-weight: bold;">❌ System Status: Issues Detected</p><p style="font-size: 0.9em;">Database connection failed</p>';
-                        statusDiv.style.backgroundColor = '#f8d7da';
-                        statusDiv.style.borderLeft = '4px solid #dc3545';
-                    }
-                })
-                .catch(error => {
-                    statusDiv.innerHTML = '<p style="color: #dc3545; font-weight: bold;">❌ System Error</p><p style="font-size: 0.9em;">' + error.message + '</p>';
-                    statusDiv.style.backgroundColor = '#f8d7da';
-                    statusDiv.style.borderLeft = '4px solid #dc3545';
-                });
-        }
-
         function getQuickStats() {
             const statsDiv = document.getElementById('statsResult');
             statsDiv.style.display = 'block';
@@ -299,71 +246,8 @@
                 .catch(error => {
                     statsDiv.innerHTML = '<p style="color: #dc3545;">Error: ' + error.message + '</p>';
                     statsDiv.style.backgroundColor = '#f8d7da';
-                    statsDiv.style.borderLeft = '4px solid #dc3545';
+                    statusDiv.style.borderLeft = '4px solid #dc3545';
                 });
-        }
-
-        function createServicePrincipal() {
-            const userName = document.getElementById('userName').value;
-            const userEmail = document.getElementById('userEmail').value;
-            const appName = document.getElementById('appName').value;
-            const resultDiv = document.getElementById('createResult');
-            
-            resultDiv.style.display = 'block';
-            
-            if (!userName || !userEmail || !appName) {
-                resultDiv.innerHTML = '<p style="color: #dc3545; font-weight: bold;">❌ Please fill in all fields</p>';
-                resultDiv.style.backgroundColor = '#f8d7da';
-                resultDiv.style.borderLeft = '4px solid #dc3545';
-                return;
-            }
-            
-            resultDiv.innerHTML = '<p style="color: #666;">🔄 Creating Service Principal...</p>';
-            resultDiv.style.backgroundColor = '#fff3cd';
-            resultDiv.style.borderLeft = '4px solid #ffc107';
-            
-            fetch('/create_app', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    user_name: userName,
-                    user_email: userEmail,
-                    app_name: appName
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.message) {
-                    resultDiv.innerHTML = `
-                        <p style="color: #28a745; font-weight: bold;">✅ Success!</p>
-                        <p style="font-size: 0.9em; margin-top: 5px;">${data.message}</p>
-                    `;
-                    resultDiv.style.backgroundColor = '#d4edda';
-                    resultDiv.style.borderLeft = '4px solid #28a745';
-                    
-                    // Clear the form
-                    document.getElementById('userName').value = '';
-                    document.getElementById('userEmail').value = '';
-                    document.getElementById('appName').value = '';
-                } else {
-                    resultDiv.innerHTML = `
-                        <p style="color: #dc3545; font-weight: bold;">❌ Error</p>
-                        <p style="font-size: 0.9em; margin-top: 5px;">${data.error || 'Unknown error occurred'}</p>
-                    `;
-                    resultDiv.style.backgroundColor = '#f8d7da';
-                    resultDiv.style.borderLeft = '4px solid #dc3545';
-                }
-            })
-            .catch(error => {
-                resultDiv.innerHTML = `
-                    <p style="color: #dc3545; font-weight: bold;">❌ Network Error</p>
-                    <p style="font-size: 0.9em; margin-top: 5px;">${error.message}</p>
-                `;
-                resultDiv.style.backgroundColor = '#f8d7da';
-                resultDiv.style.borderLeft = '4px solid #dc3545';
-            });
         }
     </script>
 </body>
