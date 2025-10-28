@@ -263,19 +263,12 @@ class UserService:
         finally:
             conn.close()
 
-    def get_monthly_report_data(self, year, month, include_all_apps=False):
+    def get_monthly_report_data(self, year, month):
         """
         Gets Service Principal creation report for a specific month/year.
-        
-        Args:
-            year: Report year
-            month: Report month
-            include_all_apps: If True, includes all apps from app_secrets table
-                            If False, only includes apps created via Flask app (user_info table)
-        
         Returns statistics and detailed list of created SPNs.
         """
-        print(f"[DEBUG] Generating monthly report for year={year}, month={month}, include_all_apps={include_all_apps}")
+        print(f"[DEBUG] Generating monthly report for year={year}, month={month}")
         conn = self.db_config.connect()
         if not conn:
             print("[ERROR] Database connection failed in get_monthly_report_data")
@@ -284,77 +277,38 @@ class UserService:
         try:
             cursor = conn.cursor()
             
-            if include_all_apps:
-                # Get summary statistics from app_secrets (includes all apps)
-                cursor.execute("""
-                    SELECT 
-                        COUNT(DISTINCT app_name) as total_created,
-                        COUNT(DISTINCT ISNULL(ui.user_name, 'Unknown')) as unique_users,
-                        COUNT(DISTINCT ISNULL(ui.email, 'Unknown')) as unique_emails
-                    FROM app_secrets s
-                    LEFT JOIN user_info ui ON s.user_info_id = ui.id
-                    WHERE YEAR(s.created_date) = ? AND MONTH(s.created_date) = ?
-                """, (year, month))
-                
-                summary_row = cursor.fetchone()
-                summary = {
-                    'total_created': summary_row[0] if summary_row else 0,
-                    'unique_users': summary_row[1] if summary_row else 0,
-                    'unique_emails': summary_row[2] if summary_row else 0,
-                    'year': year,
-                    'month': month,
-                    'report_type': 'All Applications (including manual/external)'
-                }
-                
-                # Get detailed list from app_secrets
-                cursor.execute("""
-                    SELECT 
-                        ISNULL(ui.user_name, 'Unknown') as user_name,
-                        ISNULL(ui.email, 'Unknown') as email,
-                        s.app_name,
-                        s.created_date,
-                        DAY(s.created_date) as day_of_month,
-                        s.display_name
-                    FROM app_secrets s
-                    LEFT JOIN user_info ui ON s.user_info_id = ui.id
-                    WHERE YEAR(s.created_date) = ? AND MONTH(s.created_date) = ?
-                    ORDER BY s.created_date DESC
-                """, (year, month))
-            else:
-                # Get summary statistics from user_info (Flask app created only)
-                cursor.execute("""
-                    SELECT 
-                        COUNT(*) as total_created,
-                        COUNT(DISTINCT user_name) as unique_users,
-                        COUNT(DISTINCT email) as unique_emails
-                    FROM user_info 
-                    WHERE YEAR(created_date) = ? AND MONTH(created_date) = ?
-                """, (year, month))
-                
-                summary_row = cursor.fetchone()
-                summary = {
-                    'total_created': summary_row[0] if summary_row else 0,
-                    'unique_users': summary_row[1] if summary_row else 0,
-                    'unique_emails': summary_row[2] if summary_row else 0,
-                    'year': year,
-                    'month': month,
-                    'report_type': 'Flask App Created Only'
-                }
-                
-                # Get detailed list from user_info
-                cursor.execute("""
-                    SELECT 
-                        user_name, 
-                        email, 
-                        app_name, 
-                        created_date,
-                        DAY(created_date) as day_of_month
-                    FROM user_info 
-                    WHERE YEAR(created_date) = ? AND MONTH(created_date) = ?
-                    ORDER BY created_date DESC
-                """, (year, month))
+            # Get summary statistics
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total_created,
+                    COUNT(DISTINCT user_name) as unique_users,
+                    COUNT(DISTINCT email) as unique_emails
+                FROM user_info 
+                WHERE YEAR(created_date) = ? AND MONTH(created_date) = ?
+            """, (year, month))
             
+            summary_row = cursor.fetchone()
+            summary = {
+                'total_created': summary_row[0] if summary_row else 0,
+                'unique_users': summary_row[1] if summary_row else 0,
+                'unique_emails': summary_row[2] if summary_row else 0,
+                'year': year,
+                'month': month
+            }
             print(f"[DEBUG] Summary data: {summary}")
+            
+            # Get detailed list of created SPNs
+            cursor.execute("""
+                SELECT 
+                    user_name, 
+                    email, 
+                    app_name, 
+                    created_date,
+                    DAY(created_date) as day_of_month
+                FROM user_info 
+                WHERE YEAR(created_date) = ? AND MONTH(created_date) = ?
+                ORDER BY created_date DESC
+            """, (year, month))
             
             columns = [column[0] for column in cursor.description]
             details = [dict(zip(columns, row)) for row in cursor.fetchall()]

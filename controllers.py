@@ -306,7 +306,7 @@ class AppController:
                 print(f"[ERROR] Failed to send expired email to {secret['id']}: {e}")
         return {'message': f'Expired notifications sent to {len(expired_secrets)} user(s).'}, 200
 
-    def generate_monthly_report(self, year=None, month=None, send_email=True, admin_email="azurespnautomation@gmail.com", output_format="html", include_all_apps=False):
+    def generate_monthly_report(self, year=None, month=None, send_email=True, admin_email="azurespnautomation@gmail.com", output_format="html"):
         """
         Generates monthly Service Principal creation report in HTML or email format.
         
@@ -316,7 +316,6 @@ class AppController:
             send_email: Whether to send email (default: True)
             admin_email: Email recipient for reports
             output_format: 'html' for standalone HTML file, 'email' for email HTML
-            include_all_apps: If True, includes all apps from database, not just Flask-created ones
         """
         try:
             print(f"[DEBUG] generate_monthly_report called with year={year}, month={month}, send_email={send_email}, output_format={output_format}")
@@ -324,22 +323,10 @@ class AppController:
             # Use previous month if no specific month provided
             if year is None or month is None:
                 print("[DEBUG] Using previous month report")
-                if include_all_apps:
-                    # For previous month, we need to calculate it manually when include_all_apps=True
-                    from datetime import datetime
-                    now = datetime.now()
-                    if now.month == 1:
-                        prev_year = now.year - 1
-                        prev_month = 12
-                    else:
-                        prev_year = now.year
-                        prev_month = now.month - 1
-                    report_data = self.user_service.get_monthly_report_data(prev_year, prev_month, include_all_apps=True)
-                else:
-                    report_data = self.user_service.get_previous_month_report()
+                report_data = self.user_service.get_previous_month_report()
             else:
-                print(f"[DEBUG] Using specific month: {year}-{month}, include_all_apps: {include_all_apps}")
-                report_data = self.user_service.get_monthly_report_data(year, month, include_all_apps=include_all_apps)
+                print(f"[DEBUG] Using specific month: {year}-{month}")
+                report_data = self.user_service.get_monthly_report_data(year, month)
             
             if not report_data:
                 print("[ERROR] report_data is None or empty")

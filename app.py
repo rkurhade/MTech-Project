@@ -163,7 +163,6 @@ def generate_monthly_report():
         year = request.args.get('year', type=int)
         month = request.args.get('month', type=int)
         admin_email = request.args.get('admin_email', 'azurespnautomation@gmail.com')
-        include_all_apps = request.args.get('include_all', 'false').lower() == 'true'
         
         # Send email for POST, return JSON for GET
         send_email = (request.method == 'POST')
@@ -172,8 +171,7 @@ def generate_monthly_report():
             year=year, 
             month=month, 
             send_email=send_email, 
-            admin_email=admin_email,
-            include_all_apps=include_all_apps
+            admin_email=admin_email
         )
         return jsonify(response), status
     except Exception as e:
@@ -229,19 +227,16 @@ def view_html_report():
     Query parameters:
     - year: specific year (optional, defaults to previous month)
     - month: specific month (optional, defaults to previous month)
-    - include_all: 'true' to include all apps, 'false' for Flask-created only
     """
     try:
         year = request.args.get('year', type=int)
         month = request.args.get('month', type=int)
-        include_all_apps = request.args.get('include_all', 'false').lower() == 'true'
         
         response, status = app_controller.generate_monthly_report(
             year=year, 
             month=month, 
             send_email=False,
-            output_format="html",
-            include_all_apps=include_all_apps
+            output_format="html"
         )
         
         if status == 200 and 'html_content' in response:
