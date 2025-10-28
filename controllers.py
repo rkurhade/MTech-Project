@@ -76,7 +76,7 @@ class AppController:
         secret_info = {
             'key_id': 'initial',  # You may want to fetch the real key_id from Azure response
             'end_date': expires_on,
-            'display_name': f"{app_name} secret"
+            'display_name': f"{app_name} - New Secret"
         }
         success = self.user_service.store_user_and_secret(user_name, email, app_name, secret_info)
         if not success:
@@ -157,7 +157,7 @@ class AppController:
         secret_info = {
             'key_id': 'renewed',  # You may want to fetch the real key_id from Azure response
             'end_date': new_expiry_date,
-            'display_name': f"{app_name} secret renewed"
+            'display_name': f"{app_name} - Secret Renewed"
         }
         success = self.user_service.add_new_secret(app_name, secret_info)
         if not success:
