@@ -30,13 +30,24 @@ class AppController:
             print("[ERROR] Token fetch failed.")
             return {'error': 'Failed to obtain access token from Azure Entra ID.'}, 500
 
+        # Check if Application Registration exists
         existing_app = self.azure_ad_client.search_application(token, app_name)
         if existing_app:
-            print("[ERROR] App already exists:", app_name)
+            print("[ERROR] Application Registration already exists:", app_name)
             return {
-                'error': f"Service Principal with name '{app_name}' already exists.",
+                'error': f"Application Registration with name '{app_name}' already exists.",
                 'app_id': existing_app['id'],
                 'client_id': existing_app['appId']
+            }, 409
+
+        # Check if Service Principal (Enterprise Application) exists
+        existing_sp = self.azure_ad_client.search_service_principal(token, app_name)
+        if existing_sp:
+            print("[ERROR] Service Principal already exists:", app_name)
+            return {
+                'error': f"Service Principal (Enterprise Application) with name '{app_name}' already exists.",
+                'sp_id': existing_sp['id'],
+                'app_id': existing_sp['appId']
             }, 409
 
         client_id, client_secret = self.azure_ad_client.create_application(token, app_name)

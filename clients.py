@@ -1,7 +1,7 @@
 # clients.py
 import requests
 import os
-from datetime import datetime # NEW: Import for creating unique secret names
+from datetime import datetime, timedelta # NEW: Import for creating unique secret names
 
 class AzureADClient:
     def __init__(self, config):
@@ -54,6 +54,31 @@ class AzureADClient:
             print(f"[ERROR] Failed to search application: {err}")
         return None
 
+    def search_service_principal(self, token, app_name):
+        """
+        Searches for a Service Principal (Enterprise Application) by display name.
+        """
+        if self.mock:
+            print(f"[MOCK] No service principal found for name: {app_name}")
+            return None
+
+        url = f"{self.graph_endpoint}/servicePrincipals?$filter=displayName eq '{app_name}'"
+
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            if data['value']:
+                return data['value'][0]  # Return the first matching service principal
+            return None
+        except requests.exceptions.RequestException as err:
+            print(f"[ERROR] Failed to search service principal: {err}")
+        return None
+
     def create_application(self, token, app_name):
         if self.mock:
             print(f"[MOCK] Creating fake app: {app_name}")
@@ -62,6 +87,7 @@ class AzureADClient:
         headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
         app_data = {"displayName": app_name}
 
+        # Step 1: Create the Application Registration
         response = requests.post(f"{self.graph_endpoint}/applications", headers=headers, json=app_data)
         if not response.ok:
             print(f"[ERROR] Failed to create Azure app '{app_name}': {response.status_code} - {response.text}")
@@ -70,17 +96,39 @@ class AzureADClient:
         app = response.json()
         app_id = app.get('id')
         client_id = app.get('appId')
+        print(f"[INFO] Created Application Registration: {app_name} with Client ID: {client_id}")
 
+        # Step 2: Create the Service Principal (Enterprise Application)
+        sp_data = {"appId": client_id}
+        sp_response = requests.post(f"{self.graph_endpoint}/servicePrincipals", headers=headers, json=sp_data)
+        if not sp_response.ok:
+            print(f"[ERROR] Failed to create Service Principal for '{app_name}': {sp_response.status_code} - {sp_response.text}")
+            # If SP creation fails, we should clean up the application
+            self._cleanup_application(token, app_id)
+            return None, None
+        
+        sp = sp_response.json()
+        sp_object_id = sp.get('id')
+        print(f"[INFO] Created Service Principal (Enterprise App): {app_name} with Object ID: {sp_object_id}")
+
+        # Step 3: Create the client secret
         secret_data = {"passwordCredential": {"displayName": f"{app_name} secret"}}
         secret_response = requests.post(f"{self.graph_endpoint}/applications/{app_id}/addPassword", headers=headers, json=secret_data)
         if secret_response.ok:
             client_secret = secret_response.json().get('secretText')
+            print(f"[INFO] Created client secret for '{app_name}'")
             return client_id, client_secret
 
         print(f"[ERROR] Failed to create secret: {secret_response.status_code} - {secret_response.text}")
+        # Clean up both SP and App if secret creation fails
+        self._cleanup_service_principal(token, client_id)
+        self._cleanup_application(token, app_id)
         return None, None
 
     def delete_application(self, token, client_id):
+        """
+        Deletes both the Service Principal (Enterprise App) and Application Registration.
+        """
         if self.mock:
             print(f"[MOCK] Deleting fake app: {client_id}")
             return True
@@ -90,32 +138,93 @@ class AzureADClient:
             'Content-Type': 'application/json'
         }
 
+        # Step 1: Delete Service Principal first
+        sp_deleted = self._cleanup_service_principal(token, client_id)
+        
+        # Step 2: Delete Application Registration
         search_url = f"{self.graph_endpoint}/applications?$filter=appId eq '{client_id}'"
         search_response = requests.get(search_url, headers=headers)
 
         if not search_response.ok:
             print(f"[ERROR] Failed to find app for deletion: {search_response.status_code} - {search_response.text}")
-            return False
+            return sp_deleted  # Return SP deletion result if we can't find the app
 
         apps = search_response.json().get('value', [])
         if not apps:
-            print("[INFO] No service principal found to delete.")
-            return False
+            print("[INFO] No application registration found to delete.")
+            return sp_deleted
 
         app_object_id = apps[0]['id']
+        app_deleted = self._cleanup_application(token, app_object_id)
+        
+        if app_deleted and sp_deleted:
+            print("[INFO] Both Service Principal and Application Registration deleted successfully.")
+            return True
+        elif app_deleted:
+            print("[WARN] Application deleted but Service Principal deletion failed/skipped.")
+            return True
+        elif sp_deleted:
+            print("[WARN] Service Principal deleted but Application deletion failed.")
+            return False
+        else:
+            print("[ERROR] Failed to delete both Service Principal and Application.")
+            return False
+
+    def _cleanup_service_principal(self, token, client_id):
+        """
+        Helper method to delete Service Principal (Enterprise Application).
+        """
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+
+        # Find Service Principal by appId
+        sp_search_url = f"{self.graph_endpoint}/servicePrincipals?$filter=appId eq '{client_id}'"
+        sp_search_response = requests.get(sp_search_url, headers=headers)
+
+        if not sp_search_response.ok:
+            print(f"[WARN] Failed to search for Service Principal: {sp_search_response.status_code} - {sp_search_response.text}")
+            return False
+
+        sps = sp_search_response.json().get('value', [])
+        if not sps:
+            print("[INFO] No Service Principal found to delete.")
+            return True  # Not an error if it doesn't exist
+
+        sp_object_id = sps[0]['id']
+        sp_delete_url = f"{self.graph_endpoint}/servicePrincipals/{sp_object_id}"
+        sp_delete_response = requests.delete(sp_delete_url, headers=headers)
+
+        if sp_delete_response.status_code == 204:
+            print(f"[INFO] Service Principal deleted successfully: {client_id}")
+            return True
+        else:
+            print(f"[ERROR] Failed to delete Service Principal: {sp_delete_response.status_code} - {sp_delete_response.text}")
+            return False
+
+    def _cleanup_application(self, token, app_object_id):
+        """
+        Helper method to delete Application Registration.
+        """
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+
         delete_url = f"{self.graph_endpoint}/applications/{app_object_id}"
         delete_response = requests.delete(delete_url, headers=headers)
 
         if delete_response.status_code == 204:
-            print("[INFO] Service principal deleted successfully.")
+            print(f"[INFO] Application Registration deleted successfully: {app_object_id}")
             return True
         else:
-            print(f"[ERROR] Failed to delete app: {delete_response.status_code} - {delete_response.text}")
+            print(f"[ERROR] Failed to delete Application Registration: {delete_response.status_code} - {delete_response.text}")
             return False
 
     def add_owner_to_application(self, token, app_id, user_email):
         """
-        Adds the given user email as an owner to the Azure AD app.
+        Adds the given user email as an owner to both the Azure AD Application and Service Principal.
         Tries both /users/{user_email} and /users?$filter=mail eq '{user_email}'.
         Prints full error responses for easier debugging.
         """
@@ -128,7 +237,7 @@ class AzureADClient:
             'Content-Type': 'application/json'
         }
 
-        # Try /users/{user_email} first
+        # Get user ID first
         url_user = f"{self.graph_endpoint}/users/{user_email}"
         resp_user = requests.get(url_user, headers=headers)
         if resp_user.ok:
@@ -149,16 +258,76 @@ class AzureADClient:
                 print(f"[ERROR] /users?$filter=mail eq failed: {resp_user2.status_code} {resp_user2.text}")
                 return False
 
-        # Add owner
-        url_owner = f"{self.graph_endpoint}/applications/{app_id}/owners/$ref"
+        # Add owner to Application Registration
+        url_app_owner = f"{self.graph_endpoint}/applications/{app_id}/owners/$ref"
         body = {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{user_id}"}
-        resp_owner = requests.post(url_owner, headers=headers, json=body)
-        if resp_owner.status_code not in (200, 204):
-            print(f"[ERROR] Failed to add owner {user_email}: {resp_owner.status_code} {resp_owner.text}")
+        resp_app_owner = requests.post(url_app_owner, headers=headers, json=body)
+        app_owner_success = resp_app_owner.status_code in (200, 204)
+        
+        if not app_owner_success:
+            print(f"[ERROR] Failed to add owner {user_email} to application: {resp_app_owner.status_code} {resp_app_owner.text}")
+
+        # Get Service Principal ID and add owner there too
+        sp_success = self._add_owner_to_service_principal(token, app_id, user_id, user_email, headers)
+        
+        if app_owner_success and sp_success:
+            print(f"[INFO] Added {user_email} as owner to both Application and Service Principal")
+            return True
+        elif app_owner_success:
+            print(f"[WARN] Added {user_email} as owner to Application but not Service Principal")
+            return True  # At least the application ownership worked
+        elif sp_success:
+            print(f"[WARN] Added {user_email} as owner to Service Principal but not Application")
+            return False  # This is more concerning
+        else:
+            print(f"[ERROR] Failed to add {user_email} as owner to both Application and Service Principal")
             return False
 
-        print(f"[INFO] Added {user_email} as owner to application {app_id}")
-        return True
+    def _add_owner_to_service_principal(self, token, app_id, user_id, user_email, headers):
+        """
+        Helper method to add owner to Service Principal by finding it via the application.
+        """
+        try:
+            # We need to find the Service Principal using the Application's appId
+            # First get the application to find its appId
+            app_response = requests.get(f"{self.graph_endpoint}/applications/{app_id}", headers=headers)
+            if not app_response.ok:
+                print(f"[WARN] Could not retrieve application details for Service Principal ownership")
+                return False
+                
+            app_data = app_response.json()
+            client_id = app_data.get('appId')
+            
+            # Find the corresponding Service Principal
+            sp_search_url = f"{self.graph_endpoint}/servicePrincipals?$filter=appId eq '{client_id}'"
+            sp_search_response = requests.get(sp_search_url, headers=headers)
+            
+            if not sp_search_response.ok:
+                print(f"[WARN] Could not search for Service Principal: {sp_search_response.status_code}")
+                return False
+                
+            sps = sp_search_response.json().get('value', [])
+            if not sps:
+                print(f"[WARN] No Service Principal found for application")
+                return False
+                
+            sp_object_id = sps[0]['id']
+            
+            # Add owner to Service Principal
+            url_sp_owner = f"{self.graph_endpoint}/servicePrincipals/{sp_object_id}/owners/$ref"
+            body = {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{user_id}"}
+            resp_sp_owner = requests.post(url_sp_owner, headers=headers, json=body)
+            
+            if resp_sp_owner.status_code in (200, 204):
+                print(f"[INFO] Added {user_email} as owner to Service Principal")
+                return True
+            else:
+                print(f"[WARN] Failed to add owner to Service Principal: {resp_sp_owner.status_code} {resp_sp_owner.text}")
+                return False
+                
+        except Exception as e:
+            print(f"[WARN] Exception while adding Service Principal owner: {e}")
+            return False
 
     # NEW: Method to add a new secret to an existing application (for renewal)
     def add_password_to_application(self, token, app_object_id, app_name):
