@@ -199,8 +199,13 @@ class UserService:
                        notified_upcoming, notified_expired, notified_renewal, last_updated_at, user_info_id
                 FROM app_secrets
                 WHERE end_date BETWEEN ? AND ?
-                AND (notified_upcoming = 0 OR 
-                     (notified_upcoming = 1 AND last_updated_at <= DATEADD(day, -?, GETDATE())))
+                AND (
+                    notified_upcoming = 0 
+                    OR (
+                        notified_upcoming = 1 
+                        AND DATEDIFF(day, last_updated_at, GETDATE()) >= ?
+                    )
+                )
             ''', (now, future, resend_interval_days))
             results = cursor.fetchall()
             print(f"[DEBUG] Found {len(results)} expiring secrets (between {now} and {future}, resend interval: {resend_interval_days} days)")
@@ -223,13 +228,19 @@ class UserService:
         try:
             cursor = conn.cursor()
             now = datetime.now()
+            # Fixed query to properly handle continuous expired notifications
             cursor.execute('''
                 SELECT id, app_name, key_id, end_date, created_date, display_name,
                        notified_upcoming, notified_expired, notified_renewal, last_updated_at, user_info_id
                 FROM app_secrets
                 WHERE end_date < ?
-                AND (notified_expired = 0 OR 
-                     (notified_expired = 1 AND last_updated_at <= DATEADD(day, -?, GETDATE())))
+                AND (
+                    notified_expired = 0 
+                    OR (
+                        notified_expired = 1 
+                        AND DATEDIFF(day, last_updated_at, GETDATE()) >= ?
+                    )
+                )
             ''', (now, resend_interval_days))
             results = cursor.fetchall()
             print(f"[DEBUG] Found {len(results)} expired secrets (before {now}, resend interval: {resend_interval_days} days)")
