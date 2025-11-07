@@ -12,6 +12,58 @@ class AzureADClient:
         self.graph_endpoint = 'https://graph.microsoft.com/v1.0'
         self.mock = os.getenv("MOCK_MODE", "false").lower() == "true"
 
+    def _make_request(self, method, url, headers, **kwargs):
+        """
+        Unified request helper with error handling.
+        """
+        try:
+            response = requests.request(method, url, headers=headers, **kwargs)
+            return response
+        except requests.exceptions.RequestException as err:
+            print(f"[ERROR] Request failed: {err}")
+            return None
+
+    def _delete_azure_resource(self, token, resource_type, resource_id):
+        """
+        Unified method to delete Azure resources (Application or Service Principal).
+        resource_type: 'applications' or 'servicePrincipals'
+        resource_id: object ID or search filter
+        """
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+
+        # If resource_id contains '=' it's a search filter, otherwise it's a direct ID
+        if '=' in resource_id:
+            # Search first
+            search_url = f"{self.graph_endpoint}/{resource_type}?$filter={resource_id}"
+            search_response = self._make_request('GET', search_url, headers)
+            
+            if not search_response or not search_response.ok:
+                print(f"[WARN] Failed to search for {resource_type}: {search_response.status_code if search_response else 'No response'}")
+                return False
+
+            resources = search_response.json().get('value', [])
+            if not resources:
+                print(f"[INFO] No {resource_type} found to delete.")
+                return True  # Not an error if it doesn't exist
+
+            object_id = resources[0]['id']
+        else:
+            object_id = resource_id
+
+        # Delete the resource
+        delete_url = f"{self.graph_endpoint}/{resource_type}/{object_id}"
+        delete_response = self._make_request('DELETE', delete_url, headers)
+
+        if delete_response and delete_response.status_code == 204:
+            print(f"[INFO] {resource_type.rstrip('s').title()} deleted successfully: {object_id}")
+            return True
+        else:
+            print(f"[ERROR] Failed to delete {resource_type}: {delete_response.status_code if delete_response else 'No response'}")
+            return False
+
     def get_access_token(self):
         if self.mock:
             print("[MOCK] Returning dummy token")
@@ -38,20 +90,15 @@ class AzureADClient:
             return None
 
         url = f"{self.graph_endpoint}/applications?$filter=displayName eq '{app_name}'"
-
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
         }
-        try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
+        
+        response = self._make_request('GET', url, headers)
+        if response and response.ok:
             data = response.json()
-            if data['value']:
-                return data['value'][0]  # Return the first matching app
-            return None
-        except requests.exceptions.RequestException as err:
-            print(f"[ERROR] Failed to search application: {err}")
+            return data['value'][0] if data['value'] else None
         return None
 
     def search_service_principal(self, token, app_name):
@@ -63,20 +110,15 @@ class AzureADClient:
             return None
 
         url = f"{self.graph_endpoint}/servicePrincipals?$filter=displayName eq '{app_name}'"
-
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
         }
-        try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
+        
+        response = self._make_request('GET', url, headers)
+        if response and response.ok:
             data = response.json()
-            if data['value']:
-                return data['value'][0]  # Return the first matching service principal
-            return None
-        except requests.exceptions.RequestException as err:
-            print(f"[ERROR] Failed to search service principal: {err}")
+            return data['value'][0] if data['value'] else None
         return None
 
     def create_application(self, token, app_name):
@@ -174,53 +216,13 @@ class AzureADClient:
         """
         Helper method to delete Service Principal (Enterprise Application).
         """
-        headers = {
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json'
-        }
-
-        # Find Service Principal by appId
-        sp_search_url = f"{self.graph_endpoint}/servicePrincipals?$filter=appId eq '{client_id}'"
-        sp_search_response = requests.get(sp_search_url, headers=headers)
-
-        if not sp_search_response.ok:
-            print(f"[WARN] Failed to search for Service Principal: {sp_search_response.status_code} - {sp_search_response.text}")
-            return False
-
-        sps = sp_search_response.json().get('value', [])
-        if not sps:
-            print("[INFO] No Service Principal found to delete.")
-            return True  # Not an error if it doesn't exist
-
-        sp_object_id = sps[0]['id']
-        sp_delete_url = f"{self.graph_endpoint}/servicePrincipals/{sp_object_id}"
-        sp_delete_response = requests.delete(sp_delete_url, headers=headers)
-
-        if sp_delete_response.status_code == 204:
-            print(f"[INFO] Service Principal deleted successfully: {client_id}")
-            return True
-        else:
-            print(f"[ERROR] Failed to delete Service Principal: {sp_delete_response.status_code} - {sp_delete_response.text}")
-            return False
+        return self._delete_azure_resource(token, 'servicePrincipals', f"appId eq '{client_id}'")
 
     def _cleanup_application(self, token, app_object_id):
         """
         Helper method to delete Application Registration.
         """
-        headers = {
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json'
-        }
-
-        delete_url = f"{self.graph_endpoint}/applications/{app_object_id}"
-        delete_response = requests.delete(delete_url, headers=headers)
-
-        if delete_response.status_code == 204:
-            print(f"[INFO] Application Registration deleted successfully: {app_object_id}")
-            return True
-        else:
-            print(f"[ERROR] Failed to delete Application Registration: {delete_response.status_code} - {delete_response.text}")
-            return False
+        return self._delete_azure_resource(token, 'applications', app_object_id)
 
     def add_owner_to_application(self, token, app_id, user_email):
         """
